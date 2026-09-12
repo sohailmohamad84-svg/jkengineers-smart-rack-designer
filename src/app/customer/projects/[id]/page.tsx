@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { Navbar } from '@/presentation/components/navigation/Navbar';
@@ -18,6 +18,7 @@ import {
   Calendar,
   IndianRupee,
   CheckCircle,
+  Download,
 } from 'lucide-react';
 
 export default function CustomerProjectDetailPage() {
@@ -28,6 +29,15 @@ export default function CustomerProjectDetailPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [project, setProject] = useState<any>(null);
   const [activeVersionIndex, setActiveVersionIndex] = useState<number>(0);
+
+  // Interactive 2D Arrange Mode States
+  const [isArrangeMode, setIsArrangeMode] = useState<boolean>(false);
+  const [isRepricing, setIsRepricing] = useState<boolean>(false);
+  const [isSavingVersion, setIsSavingVersion] = useState<boolean>(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
+  const [isDirty, setIsDirty] = useState<boolean>(false);
+  const [customRacks, setCustomRacks] = useState<PlacedRack[] | null>(null);
+  const repriceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
@@ -96,6 +106,99 @@ export default function CustomerProjectDetailPage() {
     isDoubleSided: r.rackType?.isDoubleSided || false,
   })) || [];
 
+  const displayedRacks: PlacedRack[] = customRacks || racks;
+
+  const handleRacksChange = (updatedRacks: PlacedRack[]) => {
+    setCustomRacks(updatedRacks);
+    setIsDirty(true);
+
+    if (repriceTimerRef.current) clearTimeout(repriceTimerRef.current);
+    setIsRepricing(true);
+
+    repriceTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/designer/reprice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ racks: updatedRacks, includeInstallation: true }),
+        });
+        const data = await res.json();
+        if (data.success && data.estimate) {
+          setProject((prev: any) => {
+            if (!prev) return prev;
+            const updated = JSON.parse(JSON.stringify(prev));
+            const activeVer = updated.designs[0].versions[activeVersionIndex];
+            if (activeVer) {
+              activeVer.estimate = data.estimate;
+              activeVer.totalRacks = data.totalRacks;
+              activeVer.totalDisplayAreaSqM = data.totalDisplayAreaSqM;
+            }
+            return updated;
+          });
+        }
+      } catch (err) {
+        console.error('Reprice error:', err);
+      } finally {
+        setIsRepricing(false);
+      }
+    }, 400);
+  };
+
+  const handleSaveArrangement = async () => {
+    if (!project) return;
+    setIsSavingVersion(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/versions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          racks: displayedRacks,
+          includeInstallation: true,
+          note: 'Customer customized layout',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsDirty(false);
+        setCustomRacks(null);
+        const projRes = await fetch(`/api/projects/${projectId}`);
+        const projData = await projRes.json();
+        if (projData.success && projData.project) {
+          setProject(projData.project);
+          setActiveVersionIndex(0);
+          alert(`New Layout Version ${data.version?.versionNumber} successfully saved!`);
+        }
+      } else {
+        alert(data.message || 'Failed to save version');
+      }
+    } catch (err: any) {
+      alert('Error saving version: ' + err.message);
+    } finally {
+      setIsSavingVersion(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!project) return;
+    setIsDownloadingPdf(true);
+    try {
+      const verId = currentVersion?.id ? `?versionId=${currentVersion.id}` : '';
+      const link = document.createElement('a');
+      link.href = `/api/projects/${projectId}/pdf${verId}`;
+      link.setAttribute(
+        'download',
+        `JK-Engineers-Works-Quotation-${project.projectCode}-V${currentVersion?.versionNumber || 1}.pdf`
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Download PDF error:', err);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
       <Navbar />
@@ -138,27 +241,43 @@ export default function CustomerProjectDetailPage() {
             </p>
           </div>
 
-          {estimate && (
-            <div className="bg-slate-950 text-white p-4 rounded-xl text-right shrink-0">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 block">Indicative Cost</span>
-              <div className="text-2xl font-black text-brand-400">
-                ₹{estimate.grandTotal.toLocaleString('en-IN')}
+          <div className="flex items-center flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={isDownloadingPdf}
+              className="px-4 py-3 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-xl transition-all flex items-center shadow-md disabled:opacity-50"
+            >
+              <Download className="w-4 h-4 mr-1.5" />
+              <span>{isDownloadingPdf ? 'Generating PDF...' : 'Download Quotation (PDF)'}</span>
+            </button>
+
+            {estimate && (
+              <div className="bg-slate-950 text-white p-4 rounded-xl text-right shrink-0">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 block">Indicative Cost</span>
+                <div className="text-2xl font-black text-brand-400">
+                  ₹{estimate.grandTotal.toLocaleString('en-IN')}
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Range: ₹{estimate.minRange.toLocaleString('en-IN')} – ₹{estimate.maxRange.toLocaleString('en-IN')}
+                </span>
               </div>
-              <span className="text-[11px] text-slate-400">
-                Range: ₹{estimate.minRange.toLocaleString('en-IN')} – ₹{estimate.maxRange.toLocaleString('en-IN')}
-              </span>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Version Switcher Tabs */}
         {versions.length > 0 && (
-          <div className="flex items-center space-x-2 border-b border-slate-200 pb-2">
+          <div className="flex items-center space-x-2 border-b border-slate-200 pb-2 overflow-x-auto">
             {versions.map((ver: any, idx: number) => (
               <button
                 key={ver.id}
-                onClick={() => setActiveVersionIndex(idx)}
-                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
+                onClick={() => {
+                  setActiveVersionIndex(idx);
+                  setCustomRacks(null);
+                  setIsDirty(false);
+                }}
+                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all whitespace-nowrap ${
                   activeVersionIndex === idx
                     ? 'bg-brand-500 text-white shadow-sm'
                     : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -168,7 +287,9 @@ export default function CustomerProjectDetailPage() {
                   ? 'Option A: Max Display'
                   : ver.optionType === 'OPTION_B_BALANCED'
                   ? 'Option B: Balanced'
-                  : 'Option C: Budget Optimized'}
+                  : ver.optionType === 'OPTION_C_BUDGET_OPTIMIZED'
+                  ? 'Option C: Budget Optimized'
+                  : `Version ${ver.versionNumber}: Custom Layout`}
               </button>
             ))}
           </div>
@@ -176,11 +297,19 @@ export default function CustomerProjectDetailPage() {
 
         {/* 2D Interactive Canvas */}
         <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <div className="h-[520px]">
+          <div className="min-h-[520px]">
             <ShopFloorCanvas
               shop={shopSpec}
-              racks={racks}
+              racks={displayedRacks}
               aisleWidthMm={currentVersion?.aisleWidthMm || 1000}
+              isArrangeMode={isArrangeMode}
+              onToggleArrangeMode={() => setIsArrangeMode(!isArrangeMode)}
+              onRacksChange={handleRacksChange}
+              storeTypeCode={project.storeType?.code || 'SUPERMARKET'}
+              onSaveArrangement={handleSaveArrangement}
+              isSaving={isSavingVersion}
+              isRepricing={isRepricing}
+              isDirty={isDirty}
             />
           </div>
         </div>

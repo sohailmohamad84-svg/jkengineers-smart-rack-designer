@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Navbar } from '@/presentation/components/navigation/Navbar';
 import { Footer } from '@/presentation/components/navigation/Footer';
 import { ShopFloorCanvas } from '@/presentation/components/canvas/ShopFloorCanvas';
 import { StoreLayoutResult, DesignOption } from '@/domain/entities/Design';
 import { ShopSpecification } from '@/domain/entities/Shop';
+import { PlacedRack } from '@/domain/entities/Rack';
 import {
   ShoppingBag,
   Store,
@@ -30,6 +31,7 @@ import {
   Sparkles,
   HelpCircle,
   Info,
+  Download,
 } from 'lucide-react';
 
 interface StoreTypeData {
@@ -135,6 +137,120 @@ export default function DesignerPage() {
   const [activeOptionIndex, setActiveOptionIndex] = useState<number>(1); // Default Option B (Balanced)
   const [generatedProjectId, setGeneratedProjectId] = useState<string>('');
   const [generatedProjectCode, setGeneratedProjectCode] = useState<string>('');
+
+  // Interactive 2D Arrange Mode States
+  const [isArrangeMode, setIsArrangeMode] = useState<boolean>(false);
+  const [isRepricing, setIsRepricing] = useState<boolean>(false);
+  const [isSavingVersion, setIsSavingVersion] = useState<boolean>(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
+  const [isDirty, setIsDirty] = useState<boolean>(false);
+  const repriceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleRacksChange = (updatedRacks: PlacedRack[]) => {
+    if (!layoutResult) return;
+    setIsDirty(true);
+
+    const updatedOptions = [...layoutResult.options];
+    const currentOpt = { ...updatedOptions[activeOptionIndex], racks: updatedRacks };
+    updatedOptions[activeOptionIndex] = currentOpt;
+    setLayoutResult({ ...layoutResult, options: updatedOptions });
+
+    // Debounce live authoritative repricing
+    if (repriceTimerRef.current) clearTimeout(repriceTimerRef.current);
+    setIsRepricing(true);
+
+    repriceTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/designer/reprice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ racks: updatedRacks, includeInstallation: true }),
+        });
+        const data = await res.json();
+        if (data.success && data.estimate) {
+          setLayoutResult((prev) => {
+            if (!prev) return prev;
+            const nextOpts = [...prev.options];
+            nextOpts[activeOptionIndex] = {
+              ...nextOpts[activeOptionIndex],
+              totalRacks: data.totalRacks,
+              totalDisplayAreaSqM: data.totalDisplayAreaSqM,
+              racksByType: data.racksByType,
+              estimate: data.estimate,
+            };
+            return { ...prev, options: nextOpts };
+          });
+        }
+      } catch (err) {
+        console.error('Reprice error:', err);
+      } finally {
+        setIsRepricing(false);
+      }
+    }, 400);
+  };
+
+  const handleSaveArrangement = async () => {
+    if (!layoutResult || !generatedProjectId) return;
+    setIsSavingVersion(true);
+    try {
+      const activeOpt = layoutResult.options[activeOptionIndex];
+      const res = await fetch(`/api/projects/${generatedProjectId}/versions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          racks: activeOpt.racks,
+          includeInstallation: true,
+          note: `Custom arrangement (${activeOpt.title || 'Modified'})`,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.version) {
+        setIsDirty(false);
+        const newOpt: DesignOption = {
+          versionNumber: data.version.versionNumber,
+          optionType: data.version.optionType,
+          title: `Version ${data.version.versionNumber}: Custom Arrangement`,
+          subtitle: 'Customer arranged floor plan',
+          totalRacks: data.version.totalRacks,
+          racksByType: activeOpt.racksByType,
+          totalDisplayAreaSqM: data.version.totalDisplayAreaSqM,
+          floorAreaSqM: data.version.floorAreaSqM,
+          aisleWidthMm: data.version.aisleWidthMm,
+          racks: activeOpt.racks,
+          estimate: data.version.estimate,
+          explanation: data.version.explanation,
+          highlights: [`Custom arrangement preserved with ${data.version.totalRacks} fixtures`],
+        };
+        const nextOpts = [...layoutResult.options, newOpt];
+        setLayoutResult({ ...layoutResult, options: nextOpts });
+        setActiveOptionIndex(nextOpts.length - 1);
+        alert(`Layout successfully saved as Version ${data.version.versionNumber}!`);
+      } else {
+        alert(data.message || 'Failed to save version');
+      }
+    } catch (err: any) {
+      alert('Error saving version: ' + err.message);
+    } finally {
+      setIsSavingVersion(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!generatedProjectId) return;
+    setIsDownloadingPdf(true);
+    try {
+      const link = document.createElement('a');
+      link.href = `/api/projects/${generatedProjectId}/pdf`;
+      link.setAttribute('download', `JK-Engineers-Works-Quotation-${generatedProjectCode}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Failed to download PDF:', err);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
 
   // Fetch store types on load
   useEffect(() => {
@@ -1262,14 +1378,33 @@ export default function DesignerPage() {
                   <Layers className="w-4 h-4 text-brand-500" />
                   <h3 className="text-sm font-bold text-slate-900">Interactive 2D Shop Floor Plan</h3>
                 </div>
-                <span className="text-xs text-slate-400">Click any fixture to inspect specifications</span>
+                <div className="flex items-center space-x-3">
+                  <button
+                    type="button"
+                    onClick={handleDownloadPdf}
+                    disabled={isDownloadingPdf}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 transition-colors shadow-sm disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5 text-brand-600" />
+                    <span>{isDownloadingPdf ? 'Generating PDF...' : 'Download Quotation (PDF)'}</span>
+                  </button>
+                  <span className="text-xs text-slate-400">Drag fixtures in arrange mode to customize</span>
+                </div>
               </div>
 
-              <div className="h-[520px]">
+              <div className="min-h-[520px]">
                 <ShopFloorCanvas
                   shop={getShopSpec()}
                   racks={layoutResult.options[activeOptionIndex].racks}
                   aisleWidthMm={layoutResult.options[activeOptionIndex].aisleWidthMm}
+                  isArrangeMode={isArrangeMode}
+                  onToggleArrangeMode={() => setIsArrangeMode(!isArrangeMode)}
+                  onRacksChange={handleRacksChange}
+                  storeTypeCode={selectedStoreType}
+                  onSaveArrangement={handleSaveArrangement}
+                  isSaving={isSavingVersion}
+                  isRepricing={isRepricing}
+                  isDirty={isDirty}
                 />
               </div>
             </div>
@@ -1376,8 +1511,18 @@ export default function DesignerPage() {
                 </a>
 
                 <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  disabled={isDownloadingPdf}
+                  className="px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center shadow-md disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5 mr-1.5" />
+                  <span>{isDownloadingPdf ? 'Generating PDF...' : 'Download Quotation (PDF)'}</span>
+                </button>
+
+                <button
                   onClick={() => router.push(`/customer/projects/${generatedProjectId}`)}
-                  className="px-4 py-2.5 bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold rounded-lg transition-colors flex items-center"
+                  className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-lg transition-colors flex items-center"
                 >
                   <Save className="w-3.5 h-3.5 mr-1.5" />
                   View in Customer Portal

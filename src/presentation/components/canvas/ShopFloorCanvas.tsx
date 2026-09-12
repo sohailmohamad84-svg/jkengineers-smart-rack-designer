@@ -1,16 +1,35 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { PlacedRack } from '@/domain/entities/Rack';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { PlacedRack, RackSpecification } from '@/domain/entities/Rack';
 import { ShopSpecification } from '@/domain/entities/Shop';
-import { ZoomIn, ZoomOut, RotateCcw, Eye, Layers, Maximize2, Tag, Info, X } from 'lucide-react';
+import { PlacementValidator, ValidationResult } from '@/domain/services/PlacementValidator';
+import { ArrangeToolbar } from './ArrangeToolbar';
+import { AddRackModal } from './AddRackModal';
+import {
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Tag,
+  X,
+  AlertTriangle,
+} from 'lucide-react';
 
-interface ShopFloorCanvasProps {
+export interface ShopFloorCanvasProps {
   shop: ShopSpecification;
   racks: PlacedRack[];
   aisleWidthMm?: number;
   highlightedRackCode?: string;
-  onSelectRack?: (rack: PlacedRack) => void;
+  onSelectRack?: (rack: PlacedRack | null) => void;
+  // Arrange Mode Props
+  isArrangeMode?: boolean;
+  onToggleArrangeMode?: () => void;
+  onRacksChange?: (racks: PlacedRack[]) => void;
+  storeTypeCode?: string;
+  onSaveArrangement?: () => void;
+  isSaving?: boolean;
+  isRepricing?: boolean;
+  isDirty?: boolean;
 }
 
 export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
@@ -18,23 +37,51 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
   racks,
   aisleWidthMm = 1000,
   onSelectRack,
+  isArrangeMode = false,
+  onToggleArrangeMode,
+  onRacksChange,
+  storeTypeCode = 'GENERAL_RETAIL',
+  onSaveArrangement,
+  isSaving = false,
+  isRepricing = false,
+  isDirty = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.08); // mm to canvas pixels
   const [pan, setPan] = useState({ x: 50, y: 50 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
-  // Toggles
+  // Canvas Pan Dragging
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
+  // Grid Snapping (mm)
+  const [gridSizeMm, setGridSizeMm] = useState(250);
+
+  // Fixture Selection & Add Modal
+  const [selectedRackIndex, setSelectedRackIndex] = useState<number | null>(null);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  // Rack Dragging State
+  const [draggingRackIndex, setDraggingRackIndex] = useState<number | null>(null);
+  const [dragOffsetMm, setDragOffsetMm] = useState({ x: 0, y: 0 });
+  const [candidateRack, setCandidateRack] = useState<PlacedRack | null>(null);
+  const [candidateValidation, setCandidateValidation] = useState<ValidationResult | null>(null);
+
+  // Notification Toast
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // View Toggles
   const [showDimensions, setShowDimensions] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [showAisles, setShowAisles] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
 
-  // Selected Rack for detail drawer
-  const [selectedRack, setSelectedRack] = useState<PlacedRack | null>(null);
-
   const { lengthMm, breadthMm } = shop.dimensions;
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   // Auto-fit canvas on initial render or dimension change
   useEffect(() => {
@@ -42,7 +89,6 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
       const containerWidth = containerRef.current.clientWidth || 800;
       const containerHeight = containerRef.current.clientHeight || 550;
 
-      // Leave padding of 120px for annotations
       const scaleX = (containerWidth - 140) / lengthMm;
       const scaleY = (containerHeight - 140) / breadthMm;
       const autoScale = Math.min(scaleX, scaleY, 0.18);
@@ -55,24 +101,15 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
     }
   }, [lengthMm, breadthMm]);
 
-  // Pan handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    // Only pan if clicking canvas background, not elements
-    setIsDragging(true);
-    setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+  // Handle selected rack synchronization
+  const selectedRack = selectedRackIndex !== null && racks[selectedRackIndex] ? racks[selectedRackIndex] : null;
+
+  const handleSelectRack = (rack: PlacedRack | null, index: number | null) => {
+    setSelectedRackIndex(index);
+    if (onSelectRack) onSelectRack(rack);
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging) {
-      setPan({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y,
-      });
-    }
-  };
-
-  const handleMouseUp = () => setIsDragging(false);
-
+  // Zoom handlers
   const handleZoom = (delta: number) => {
     setScale((prev) => Math.min(0.4, Math.max(0.02, prev + delta)));
   };
@@ -93,17 +130,239 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
     }
   };
 
+  // Canvas Mouse / Touch Down (Pan)
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (draggingRackIndex !== null) return;
+    setIsPanning(true);
+    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+  };
+
+  // Canvas Mouse Move (Pan OR Rack Drag)
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      // 1. Handling Rack Dragging
+      if (draggingRackIndex !== null && isArrangeMode) {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+
+        // Current pointer in canvas mm space
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const mmX = (mouseX - pan.x) / scale;
+        const mmY = (mouseY - pan.y) / scale;
+
+        const rawCandidateX = mmX - dragOffsetMm.x;
+        const rawCandidateY = mmY - dragOffsetMm.y;
+
+        const snappedX = PlacementValidator.snapToGrid(rawCandidateX, gridSizeMm);
+        const snappedY = PlacementValidator.snapToGrid(rawCandidateY, gridSizeMm);
+
+        const activeRack = racks[draggingRackIndex];
+        const updatedCandidate: PlacedRack = {
+          ...activeRack,
+          posX: snappedX,
+          posY: snappedY,
+        };
+
+        const validation = PlacementValidator.validateRackPlacement(
+          updatedCandidate,
+          racks,
+          shop,
+          draggingRackIndex
+        );
+
+        setCandidateRack(updatedCandidate);
+        setCandidateValidation(validation);
+        return;
+      }
+
+      // 2. Handling Canvas Pan
+      if (isPanning) {
+        setPan({
+          x: e.clientX - panStart.x,
+          y: e.clientY - panStart.y,
+        });
+      }
+    },
+    [draggingRackIndex, isArrangeMode, pan, scale, dragOffsetMm, gridSizeMm, racks, shop, isPanning, panStart]
+  );
+
+  // Mouse Up (Commit or Revert Rack Drag, or End Pan)
+  const handleMouseUp = useCallback(() => {
+    if (draggingRackIndex !== null) {
+      if (candidateRack && candidateValidation && candidateValidation.isValid) {
+        // Valid drop: commit new position
+        const updatedRacks = [...racks];
+        updatedRacks[draggingRackIndex] = {
+          ...candidateRack,
+        };
+        if (onRacksChange) onRacksChange(updatedRacks);
+      } else if (candidateValidation && !candidateValidation.isValid) {
+        // Invalid drop: auto-revert to previous position!
+        showToast(`Cannot place rack: ${candidateValidation.message || 'Invalid collision'}`);
+      }
+
+      setDraggingRackIndex(null);
+      setCandidateRack(null);
+      setCandidateValidation(null);
+    }
+
+    setIsPanning(false);
+  }, [draggingRackIndex, candidateRack, candidateValidation, racks, onRacksChange]);
+
+  // Rack Drag Start
+  const handleRackDragStart = (
+    e: React.MouseEvent | React.TouchEvent,
+    rack: PlacedRack,
+    index: number
+  ) => {
+    e.stopPropagation();
+    handleSelectRack(rack, index);
+
+    if (!isArrangeMode) return;
+
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const mouseX = clientX - rect.left;
+    const mouseY = clientY - rect.top;
+    const mmX = (mouseX - pan.x) / scale;
+    const mmY = (mouseY - pan.y) / scale;
+
+    setDragOffsetMm({
+      x: mmX - rack.posX,
+      y: mmY - rack.posY,
+    });
+    setDraggingRackIndex(index);
+    setCandidateRack(rack);
+    setCandidateValidation({ isValid: true });
+  };
+
+  // Rotate Selected Rack
+  const handleRotateSelected = () => {
+    if (selectedRackIndex === null || !racks[selectedRackIndex]) return;
+
+    const currentRack = racks[selectedRackIndex];
+    const newRotation = ((currentRack.rotation || 0) + 90) % 360;
+
+    const candidate: PlacedRack = {
+      ...currentRack,
+      rotation: newRotation,
+    };
+
+    const validation = PlacementValidator.validateRackPlacement(
+      candidate,
+      racks,
+      shop,
+      selectedRackIndex
+    );
+
+    if (!validation.isValid) {
+      showToast(`Cannot rotate: ${validation.message || 'Obstructed'}`);
+      return;
+    }
+
+    const updatedRacks = [...racks];
+    updatedRacks[selectedRackIndex] = candidate;
+    if (onRacksChange) onRacksChange(updatedRacks);
+    handleSelectRack(candidate, selectedRackIndex);
+  };
+
+  // Delete Selected Rack
+  const handleDeleteSelected = () => {
+    if (selectedRackIndex === null || !racks[selectedRackIndex]) return;
+    const target = racks[selectedRackIndex];
+
+    if (target.category === 'CHECKOUT_COUNTER') {
+      const ok = window.confirm(
+        'Are you sure you want to remove the Cashier / Billing Counter? It is recommended for store operations.'
+      );
+      if (!ok) return;
+    }
+
+    const updatedRacks = racks.filter((_, idx) => idx !== selectedRackIndex);
+    handleSelectRack(null, null);
+    if (onRacksChange) onRacksChange(updatedRacks);
+  };
+
+  // Add Fixture to Layout
+  const handleAddFixture = (spec: RackSpecification) => {
+    // Initial position: center of shop snapped to grid
+    let placedX = Math.max(200, Math.round((lengthMm - spec.defaultWidthMm) / 2));
+    let placedY = Math.max(200, Math.round((breadthMm - spec.defaultDepthMm) / 2));
+    placedX = PlacementValidator.snapToGrid(placedX, gridSizeMm);
+    placedY = PlacementValidator.snapToGrid(placedY, gridSizeMm);
+
+    const newRack: PlacedRack = {
+      rackTypeCode: spec.code,
+      rackTypeName: spec.name,
+      category: spec.category,
+      label: `${spec.name} ${racks.length + 1}`,
+      posX: placedX,
+      posY: placedY,
+      rotation: 0,
+      widthMm: spec.defaultWidthMm,
+      depthMm: spec.defaultDepthMm,
+      heightMm: spec.defaultHeightMm,
+      shelvesCount: spec.defaultShelves,
+      loadCapacityKg: spec.loadCapacityKg,
+      isDoubleSided: spec.isDoubleSided,
+    };
+
+    // Find collision-free spot by stepping if needed
+    let step = 0;
+    let validRack = { ...newRack };
+    let validation = PlacementValidator.validateRackPlacement(validRack, racks, shop);
+
+    while (!validation.isValid && step < 20) {
+      step++;
+      const shiftX = (step % 4) * 300;
+      const shiftY = Math.floor(step / 4) * 300;
+      validRack.posX = Math.min(lengthMm - validRack.widthMm, placedX + shiftX);
+      validRack.posY = Math.min(breadthMm - validRack.depthMm, placedY + shiftY);
+      validation = PlacementValidator.validateRackPlacement(validRack, racks, shop);
+    }
+
+    const updated = [...racks, validRack];
+    if (onRacksChange) onRacksChange(updated);
+    handleSelectRack(validRack, updated.length - 1);
+    showToast(`Added ${spec.name} to layout.`);
+  };
+
+  // Keyboard Shortcuts (Delete, Rotate)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isArrangeMode || selectedRackIndex === null) return;
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        handleDeleteSelected();
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        handleRotateSelected();
+      } else if (e.key === 'Escape') {
+        handleSelectRack(null, null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isArrangeMode, selectedRackIndex, racks]);
+
   // Color helper for rack categories
   const getRackColor = (category: string) => {
     switch (category) {
       case 'WALL_RACK':
-        return { fill: '#1e3a8a', stroke: '#172554', text: '#ffffff', badge: 'bg-blue-900 text-blue-100' }; // Steel Navy
+        return { fill: '#1e3a8a', stroke: '#172554', text: '#ffffff', badge: 'bg-blue-900 text-blue-100' };
       case 'GONDOLA_RACK':
-        return { fill: '#0f766e', stroke: '#134e4a', text: '#ffffff', badge: 'bg-teal-900 text-teal-100' }; // Teal
+        return { fill: '#0f766e', stroke: '#134e4a', text: '#ffffff', badge: 'bg-teal-900 text-teal-100' };
       case 'END_RACK':
-        return { fill: '#d97706', stroke: '#92400e', text: '#ffffff', badge: 'bg-amber-900 text-amber-100' }; // Amber
+        return { fill: '#d97706', stroke: '#92400e', text: '#ffffff', badge: 'bg-amber-900 text-amber-100' };
       case 'CHECKOUT_COUNTER':
-        return { fill: '#047857', stroke: '#064e3b', text: '#ffffff', badge: 'bg-emerald-900 text-emerald-100' }; // Emerald
+        return { fill: '#047857', stroke: '#064e3b', text: '#ffffff', badge: 'bg-emerald-900 text-emerald-100' };
       case 'MEDICAL_RACK':
         return { fill: '#4338ca', stroke: '#312e81', text: '#ffffff', badge: 'bg-indigo-900 text-indigo-100' };
       case 'GARMENT_RACK':
@@ -114,9 +373,25 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full min-h-[500px] bg-slate-900 rounded-xl overflow-hidden select-none border border-slate-700 shadow-xl flex flex-col">
+    <div className="relative w-full h-full min-h-[520px] bg-slate-900 rounded-xl overflow-hidden select-none border border-slate-700 shadow-xl flex flex-col">
+      {/* Arrange Mode Toolbar */}
+      <ArrangeToolbar
+        isArrangeMode={isArrangeMode}
+        onToggleArrangeMode={onToggleArrangeMode || (() => {})}
+        gridSizeMm={gridSizeMm}
+        onChangeGridSize={setGridSizeMm}
+        selectedRack={selectedRack}
+        onRotateRack={handleRotateSelected}
+        onDeleteRack={handleDeleteSelected}
+        onOpenAddRackModal={() => setIsAddModalOpen(true)}
+        onSaveArrangement={onSaveArrangement}
+        isSaving={isSaving}
+        isRepricing={isRepricing}
+        isDirty={isDirty}
+      />
+
       {/* Canvas Top Bar Controls */}
-      <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
+      <div className="absolute top-16 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
         {/* Left: View Controls */}
         <div className="flex items-center space-x-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700 pointer-events-auto shadow-md">
           <button
@@ -152,7 +427,9 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
             onClick={() => setShowDimensions(!showDimensions)}
             title="Toggle Dimension Annotations"
             className={`px-2 py-1 text-xs font-semibold rounded flex items-center space-x-1 transition-colors ${
-              showDimensions ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30' : 'text-slate-400 hover:text-white'
+              showDimensions
+                ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             <span>Dimensions</span>
@@ -161,7 +438,9 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
             onClick={() => setShowLabels(!showLabels)}
             title="Toggle Fixture Labels"
             className={`px-2 py-1 text-xs font-semibold rounded flex items-center space-x-1 transition-colors ${
-              showLabels ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30' : 'text-slate-400 hover:text-white'
+              showLabels
+                ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             <Tag className="w-3 h-3 mr-1" />
@@ -171,7 +450,9 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
             onClick={() => setShowAisles(!showAisles)}
             title="Toggle Aisle Walking Corridors"
             className={`px-2 py-1 text-xs font-semibold rounded flex items-center space-x-1 transition-colors ${
-              showAisles ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30' : 'text-slate-400 hover:text-white'
+              showAisles
+                ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             <span>Aisles</span>
@@ -179,14 +460,28 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
         </div>
       </div>
 
+      {/* Floating Toast Notification */}
+      {toastMessage && (
+        <div className="absolute top-28 left-1/2 -translate-x-1/2 z-40 bg-red-900/90 backdrop-blur-md border border-red-700 text-red-100 text-xs px-4 py-2 rounded-lg shadow-xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-2">
+          <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* SVG Canvas Area */}
       <div
         ref={containerRef}
-        onMouseDown={handleMouseDown}
+        onMouseDown={handleCanvasMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        className={`w-full flex-1 relative overflow-hidden cursor-grab active:cursor-grabbing`}
+        className={`w-full flex-1 relative overflow-hidden ${
+          draggingRackIndex !== null
+            ? 'cursor-grabbing'
+            : isArrangeMode
+            ? 'cursor-default'
+            : 'cursor-grab active:cursor-grabbing'
+        }`}
       >
         <svg
           className="w-full h-full"
@@ -194,10 +489,14 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
         >
           {/* Pattern Definitions */}
           <defs>
-            {/* Grid Pattern */}
-            <pattern id="grid" width={1000 * scale} height={1000 * scale} patternUnits="userSpaceOnUse">
+            <pattern
+              id="grid"
+              width={(gridSizeMm || 1000) * scale}
+              height={(gridSizeMm || 1000) * scale}
+              patternUnits="userSpaceOnUse"
+            >
               <path
-                d={`M ${1000 * scale} 0 L 0 0 0 ${1000 * scale}`}
+                d={`M ${(gridSizeMm || 1000) * scale} 0 L 0 0 0 ${(gridSizeMm || 1000) * scale}`}
                 fill="none"
                 stroke="#1e293b"
                 strokeWidth="1"
@@ -205,8 +504,13 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
               />
             </pattern>
 
-            {/* Pillar Obstacle Hatch Pattern */}
-            <pattern id="pillarHatch" width="8" height="8" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+            <pattern
+              id="pillarHatch"
+              width="8"
+              height="8"
+              patternTransform="rotate(45 0 0)"
+              patternUnits="userSpaceOnUse"
+            >
               <line x1="0" y1="0" x2="0" y2="8" stroke="#f59e0b" strokeWidth="2" />
             </pattern>
           </defs>
@@ -246,57 +550,64 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
               strokeWidth={4}
             />
 
-            {/* Aisle Walking Corridor Indicators (Optionally shown) */}
-            {showAisles && (
-              <g opacity={0.35}>
-                <rect
-                  x={(450 + aisleWidthMm) * scale}
-                  y={(450 + aisleWidthMm) * scale}
-                  width={Math.max(0, (lengthMm - 2 * (450 + aisleWidthMm)) * scale)}
-                  height={Math.max(0, (breadthMm - 2 * (450 + aisleWidthMm)) * scale)}
-                  fill="none"
-                  stroke="#38bdf8"
-                  strokeWidth={1.5}
-                  strokeDasharray="6,4"
-                />
-              </g>
-            )}
+            {/* Door Clearance Buffer Zones (Subtle dashed fill when in arrange mode) */}
+            {isArrangeMode &&
+              shop.openings.map((op, idx) => {
+                const box = PlacementValidator.getOpeningBoundingBox(op, lengthMm, breadthMm);
+                return (
+                  <rect
+                    key={`buffer-${idx}`}
+                    x={box.minX * scale}
+                    y={box.minY * scale}
+                    width={(box.maxX - box.minX) * scale}
+                    height={(box.maxY - box.minY) * scale}
+                    fill="rgba(16, 185, 129, 0.06)"
+                    stroke="#10b981"
+                    strokeWidth={1}
+                    strokeDasharray="3,3"
+                  />
+                );
+              })}
 
-            {/* Openings: Doors and Windows */}
+            {/* Openings: Doors & Windows */}
             {shop.openings.map((op, idx) => {
-              const buffer = 300 * scale;
+              const isWindow = op.type === 'WINDOW';
               let x = 0, y = 0, w = 0, h = 0;
               let swingPath = '';
 
-              if (op.wall === 'NORTH') {
-                x = op.distanceMm * scale;
-                y = -200 * scale;
-                w = op.widthMm * scale;
-                h = 200 * scale;
-                swingPath = `M ${x} 0 A ${w} ${w} 0 0 1 ${x + w} ${w}`;
-              } else if (op.wall === 'SOUTH') {
-                x = op.distanceMm * scale;
-                y = breadthMm * scale;
-                w = op.widthMm * scale;
-                h = 200 * scale;
-                swingPath = `M ${x} ${breadthMm * scale} A ${w} ${w} 0 0 0 ${x + w} ${breadthMm * scale - w}`;
-              } else if (op.wall === 'WEST') {
-                x = -200 * scale;
-                y = op.distanceMm * scale;
-                w = 200 * scale;
-                h = op.widthMm * scale;
-              } else if (op.wall === 'EAST') {
-                x = lengthMm * scale;
-                y = op.distanceMm * scale;
-                w = 200 * scale;
-                h = op.widthMm * scale;
+              switch (op.wall) {
+                case 'NORTH':
+                  x = op.distanceMm * scale;
+                  y = -100 * scale;
+                  w = op.widthMm * scale;
+                  h = 200 * scale;
+                  if (!isWindow) swingPath = `M ${x} 0 A ${w} ${w} 0 0 0 ${x + w} ${w}`;
+                  break;
+                case 'SOUTH':
+                  x = op.distanceMm * scale;
+                  y = (breadthMm - 100) * scale;
+                  w = op.widthMm * scale;
+                  h = 200 * scale;
+                  if (!isWindow) swingPath = `M ${x} ${breadthMm * scale} A ${w} ${w} 0 0 1 ${x + w} ${(breadthMm - op.widthMm) * scale}`;
+                  break;
+                case 'WEST':
+                  x = -100 * scale;
+                  y = op.distanceMm * scale;
+                  w = 200 * scale;
+                  h = op.widthMm * scale;
+                  if (!isWindow) swingPath = `M 0 ${y} A ${h} ${h} 0 0 0 ${h} ${y + h}`;
+                  break;
+                case 'EAST':
+                  x = (lengthMm - 100) * scale;
+                  y = op.distanceMm * scale;
+                  w = 200 * scale;
+                  h = op.widthMm * scale;
+                  if (!isWindow) swingPath = `M ${lengthMm * scale} ${y} A ${h} ${h} 0 0 1 ${(lengthMm - op.widthMm) * scale} ${y + h}`;
+                  break;
               }
-
-              const isWindow = op.type === 'WINDOW';
 
               return (
                 <g key={idx}>
-                  {/* Opening Wall Cutout */}
                   <rect
                     x={x}
                     y={y}
@@ -307,7 +618,6 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
                     strokeWidth={1}
                   />
 
-                  {/* Door Swing Arc */}
                   {!isWindow && swingPath && (
                     <path
                       d={swingPath}
@@ -319,7 +629,6 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
                     />
                   )}
 
-                  {/* Label */}
                   <text
                     x={x + w / 2}
                     y={y + h / 2 + 4}
@@ -362,8 +671,11 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
 
             {/* Placed Racks */}
             {racks.map((rack, idx) => {
+              const isBeingDragged = draggingRackIndex === idx;
+              // If being dragged, render ghost/original faintly, candidate rack is rendered separately
+              const opacity = isBeingDragged ? 0.3 : 1;
               const color = getRackColor(rack.category);
-              const isSelected = selectedRack?.posX === rack.posX && selectedRack?.posY === rack.posY;
+              const isSelected = selectedRackIndex === idx;
 
               const isRotated = rack.rotation === 90 || rack.rotation === 270;
               const rWidth = (isRotated ? rack.depthMm : rack.widthMm) * scale;
@@ -374,12 +686,14 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
               return (
                 <g
                   key={idx}
+                  onMouseDown={(e) => handleRackDragStart(e, rack, idx)}
+                  onTouchStart={(e) => handleRackDragStart(e, rack, idx)}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSelectedRack(rack);
-                    if (onSelectRack) onSelectRack(rack);
+                    handleSelectRack(rack, idx);
                   }}
-                  className="cursor-pointer group"
+                  className={`${isArrangeMode ? 'cursor-move' : 'cursor-pointer'} group`}
+                  opacity={opacity}
                 >
                   {/* Rack Box */}
                   <rect
@@ -429,6 +743,63 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
                 </g>
               );
             })}
+
+            {/* Dragging Candidate Rack Overlay with Real-time Validation Highlight */}
+            {draggingRackIndex !== null && candidateRack && (
+              <g>
+                {(() => {
+                  const isRotated = candidateRack.rotation === 90 || candidateRack.rotation === 270;
+                  const cWidth = (isRotated ? candidateRack.depthMm : candidateRack.widthMm) * scale;
+                  const cHeight = (isRotated ? candidateRack.widthMm : candidateRack.depthMm) * scale;
+                  const cX = candidateRack.posX * scale;
+                  const cY = candidateRack.posY * scale;
+                  const isValid = candidateValidation?.isValid !== false;
+
+                  return (
+                    <g>
+                      {/* Candidate outline: Bright Red if invalid, Bright Cyan/Blue if valid */}
+                      <rect
+                        x={cX}
+                        y={cY}
+                        width={cWidth}
+                        height={cHeight}
+                        fill={isValid ? 'rgba(59, 130, 246, 0.4)' : 'rgba(239, 68, 68, 0.45)'}
+                        stroke={isValid ? '#38bdf8' : '#ef4444'}
+                        strokeWidth={3}
+                        strokeDasharray={isValid ? 'none' : '4,3'}
+                        rx={2}
+                      />
+
+                      {/* Warning Badge if Invalid Drop Position */}
+                      {!isValid && (
+                        <g>
+                          <rect
+                            x={cX + cWidth / 2 - 90}
+                            y={cY - 28}
+                            width={180}
+                            height={22}
+                            rx={4}
+                            fill="#991b1b"
+                            stroke="#f87171"
+                            strokeWidth={1}
+                          />
+                          <text
+                            x={cX + cWidth / 2}
+                            y={cY - 13}
+                            textAnchor="middle"
+                            fill="#ffffff"
+                            fontSize={10}
+                            fontWeight="bold"
+                          >
+                            ⚠️ {candidateValidation?.message || 'Invalid collision'}
+                          </text>
+                        </g>
+                      )}
+                    </g>
+                  );
+                })()}
+              </g>
+            )}
 
             {/* Outer Dimension Annotations */}
             {showDimensions && (
@@ -519,9 +890,16 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
         </div>
 
         <div className="flex items-center space-x-3 text-slate-400 font-mono text-[11px]">
-          <span>Total Fixtures: <strong className="text-white">{racks.length}</strong></span>
-          <span>Aisle Width: <strong className="text-white">{aisleWidthMm} mm</strong></span>
-          <span>Shop Area: <strong className="text-white">{((lengthMm * breadthMm) / 1000000).toFixed(1)} m²</strong></span>
+          <span>
+            Total Fixtures: <strong className="text-white">{racks.length}</strong>
+          </span>
+          <span>
+            Aisle Width: <strong className="text-white">{aisleWidthMm} mm</strong>
+          </span>
+          <span>
+            Shop Area:{' '}
+            <strong className="text-white">{((lengthMm * breadthMm) / 1000000).toFixed(1)} m²</strong>
+          </span>
         </div>
       </div>
 
@@ -530,13 +908,17 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
         <div className="absolute bottom-12 right-4 w-80 bg-slate-800/95 backdrop-blur-md rounded-lg border border-slate-700 shadow-2xl p-4 z-30 text-white animate-in fade-in slide-in-from-bottom-2">
           <div className="flex items-center justify-between pb-2 border-b border-slate-700">
             <div className="flex items-center space-x-2">
-              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${getRackColor(selectedRack.category).badge}`}>
+              <span
+                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                  getRackColor(selectedRack.category).badge
+                }`}
+              >
                 {selectedRack.category.replace('_', ' ')}
               </span>
               <h4 className="font-bold text-xs truncate">{selectedRack.rackTypeName}</h4>
             </div>
             <button
-              onClick={() => setSelectedRack(null)}
+              onClick={() => handleSelectRack(null, null)}
               className="text-slate-400 hover:text-white p-1"
             >
               <X className="w-4 h-4" />
@@ -546,7 +928,19 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
           <div className="py-2.5 space-y-1.5 text-xs text-slate-300">
             <div className="flex justify-between">
               <span className="text-slate-400">Dimensions (W x D x H):</span>
-              <span className="font-mono font-medium">{selectedRack.widthMm} x {selectedRack.depthMm} x {selectedRack.heightMm} mm</span>
+              <span className="font-mono font-medium">
+                {selectedRack.widthMm} x {selectedRack.depthMm} x {selectedRack.heightMm} mm
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Position (X, Y):</span>
+              <span className="font-mono text-brand-300">
+                {Math.round(selectedRack.posX)}, {Math.round(selectedRack.posY)} mm
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Orientation:</span>
+              <span className="font-mono text-amber-300">{selectedRack.rotation || 0}°</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Shelves / Tiers:</span>
@@ -554,23 +948,46 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Load Capacity:</span>
-              <span className="text-brand-400 font-bold">{selectedRack.loadCapacityKg} kg / tier</span>
+              <span className="text-brand-400 font-bold">
+                {selectedRack.loadCapacityKg} kg / tier
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Configuration:</span>
-              <span>{selectedRack.isDoubleSided ? 'Double-Sided Island' : 'Single-Sided Wall Unit'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Finishing:</span>
-              <span className="text-slate-300">7-Tank Epoxy Powder Coated</span>
+              <span>
+                {selectedRack.isDoubleSided ? 'Double-Sided Island' : 'Single-Sided Wall Unit'}
+              </span>
             </div>
           </div>
 
-          <p className="text-[10px] text-slate-400 bg-slate-900/60 p-2 rounded border border-slate-700/50 italic">
-            Manufactured from standard Tata/JSW prime steel. Standard leveling bolts included.
-          </p>
+          {isArrangeMode && (
+            <div className="mt-2 pt-2 border-t border-slate-700/60 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRotateSelected}
+                className="flex-1 py-1 px-2 bg-slate-700 hover:bg-slate-600 rounded text-xs text-slate-200 font-medium transition-colors text-center"
+              >
+                Rotate 90°
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteSelected}
+                className="py-1 px-2 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-300 rounded text-xs font-medium transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Catalogue Rack Picker Modal */}
+      <AddRackModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onAddRack={handleAddFixture}
+        storeTypeCode={storeTypeCode}
+      />
     </div>
   );
 };

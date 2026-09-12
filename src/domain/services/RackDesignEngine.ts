@@ -4,6 +4,7 @@ import { DesignOption, StoreLayoutResult } from '../entities/Design';
 import { MaterialRate } from '../entities/Material';
 import { PricingEngine } from './PricingEngine';
 import { BudgetOptimizationService } from './BudgetOptimizationService';
+import { PlacementValidator } from './PlacementValidator';
 
 interface WallSegment {
   wall: 'NORTH' | 'SOUTH' | 'EAST' | 'WEST';
@@ -151,45 +152,6 @@ export class RackDesignEngine {
 
     const effectiveAisleMm = Math.round(baseAisleMm * config.aisleMultiplier);
 
-    // Obstacle bounding boxes
-    const obstacleBoxes: BoundingBox2D[] = shop.obstacles.map((obs) => ({
-      minX: obs.posX - this.OBSTACLE_CLEARANCE_BUFFER_MM,
-      minY: obs.posY - this.OBSTACLE_CLEARANCE_BUFFER_MM,
-      maxX: obs.posX + obs.widthMm + this.OBSTACLE_CLEARANCE_BUFFER_MM,
-      maxY: obs.posY + obs.depthMm + this.OBSTACLE_CLEARANCE_BUFFER_MM,
-    }));
-
-    // Opening buffer zones (especially doors and windows)
-    const openingBoxes: BoundingBox2D[] = [];
-    for (const op of shop.openings) {
-      const buffer = this.DOOR_CLEARANCE_BUFFER_MM;
-      let minX = 0, minY = 0, maxX = 0, maxY = 0;
-
-      if (op.wall === 'NORTH') {
-        minX = op.distanceMm - buffer;
-        maxX = op.distanceMm + op.widthMm + buffer;
-        minY = 0;
-        maxY = op.type === 'WINDOW' ? 500 : 1200; // Keep generous walking zone in front of entrance
-      } else if (op.wall === 'SOUTH') {
-        minX = op.distanceMm - buffer;
-        maxX = op.distanceMm + op.widthMm + buffer;
-        minY = breadthMm - (op.type === 'WINDOW' ? 500 : 1200);
-        maxY = breadthMm;
-      } else if (op.wall === 'WEST') {
-        minX = 0;
-        maxX = op.type === 'WINDOW' ? 500 : 1200;
-        minY = op.distanceMm - buffer;
-        maxY = op.distanceMm + op.widthMm + buffer;
-      } else if (op.wall === 'EAST') {
-        minX = lengthMm - (op.type === 'WINDOW' ? 500 : 1200);
-        maxX = lengthMm;
-        minY = op.distanceMm - buffer;
-        maxY = op.distanceMm + op.widthMm + buffer;
-      }
-
-      openingBoxes.push({ minX, minY, maxX, maxY });
-    }
-
     // Select primary wall rack based on store type
     let chosenWallRack = wallRackStd;
     if (storeTypeCode === 'MEDICAL_STORE' && medicalRack) {
@@ -198,31 +160,9 @@ export class RackDesignEngine {
       chosenWallRack = garmentRack;
     }
 
-    // Helper: Check collision against obstacles and openings
+    // Helper: Check collision against obstacles, openings, and other racks via shared PlacementValidator
     const canPlaceRack = (candidate: PlacedRack): boolean => {
-      const rackBox = getRackBoundingBox(candidate);
-
-      // Check within shop boundaries
-      if (rackBox.minX < 0 || rackBox.minY < 0 || rackBox.maxX > lengthMm || rackBox.maxY > breadthMm) {
-        return false;
-      }
-
-      // Check obstacles
-      for (const obsBox of obstacleBoxes) {
-        if (doBoundingBoxesOverlap(rackBox, obsBox)) return false;
-      }
-
-      // Check openings
-      for (const opBox of openingBoxes) {
-        if (doBoundingBoxesOverlap(rackBox, opBox)) return false;
-      }
-
-      // Check against already placed racks
-      for (const existing of placedRacks) {
-        if (doBoundingBoxesOverlap(rackBox, getRackBoundingBox(existing, 20))) return false;
-      }
-
-      return true;
+      return PlacementValidator.validateRackPlacement(candidate, placedRacks, shop).isValid;
     };
 
     // --- STEP 1: CHECKOUT / BILLING COUNTER PLACEMENT ---

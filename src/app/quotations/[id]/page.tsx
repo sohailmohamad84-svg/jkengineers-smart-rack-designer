@@ -99,12 +99,20 @@ export default function QuotationViewPage() {
         </button>
 
         <div className="flex items-center space-x-3">
+          <a
+            href={`/api/projects/${project.id}/pdf`}
+            download={`JK-Engineers-Works-Quotation-${project.projectCode}.pdf`}
+            className="inline-flex items-center px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs rounded-lg shadow-sm transition-colors"
+          >
+            <Download className="w-4 h-4 mr-1.5" />
+            Download Official PDF
+          </a>
           <button
             onClick={() => window.print()}
-            className="inline-flex items-center px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white font-bold text-xs rounded-lg shadow-sm transition-colors"
+            className="inline-flex items-center px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-lg shadow-sm transition-colors"
           >
             <Printer className="w-4 h-4 mr-1.5" />
-            Print / Save as PDF
+            Print / Browser PDF
           </button>
         </div>
       </div>
