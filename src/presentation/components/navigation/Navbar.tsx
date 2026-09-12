@@ -39,64 +39,64 @@ export const Navbar: React.FC = () => {
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4">
           {/* Brand Logo */}
-          <Link href="/" className="flex items-center space-x-3 group">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-black text-xl shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform">
+          <Link href="/" className="flex items-center space-x-3 group shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-black text-xl shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform shrink-0">
               JK
             </div>
-            <div>
+            <div className="flex flex-col">
               <div className="flex items-center space-x-2">
-                <span className="font-extrabold text-lg sm:text-xl text-slate-900 tracking-tight">
+                <span className="font-extrabold text-base sm:text-lg text-slate-900 tracking-tight whitespace-nowrap">
                   JK ENGINEERS WORKS
                 </span>
-                <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-200 uppercase tracking-wide">
+                <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-200 uppercase tracking-wide shrink-0">
                   Mumbai
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 font-medium hidden sm:block">
+              <p className="text-[11px] text-slate-500 font-medium whitespace-nowrap hidden sm:block">
                 Smart Retail Racks & Storage Systems
               </p>
             </div>
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-7 text-sm font-semibold text-slate-600">
-            <Link href="/#how-it-works" className="hover:text-brand-600 transition-colors">
+          <nav className="hidden lg:flex items-center space-x-5 xl:space-x-7 text-xs xl:text-sm font-semibold text-slate-600 shrink-0">
+            <Link href="/#how-it-works" className="hover:text-brand-600 transition-colors whitespace-nowrap">
               How It Works
             </Link>
-            <Link href="/#store-types" className="hover:text-brand-600 transition-colors">
+            <Link href="/#store-types" className="hover:text-brand-600 transition-colors whitespace-nowrap">
               Store Solutions
             </Link>
-            <Link href="/#products" className="hover:text-brand-600 transition-colors">
+            <Link href="/#products" className="hover:text-brand-600 transition-colors whitespace-nowrap">
               Rack Catalog
             </Link>
-            <Link href="/#about" className="hover:text-brand-600 transition-colors">
+            <Link href="/#about" className="hover:text-brand-600 transition-colors whitespace-nowrap">
               About JK
             </Link>
             <a
               href="tel:+917942546295"
-              className="flex items-center text-slate-700 hover:text-brand-600 font-medium text-xs bg-slate-50 px-2.5 py-1.5 rounded-full border border-slate-200 transition-colors"
+              className="hidden xl:inline-flex items-center whitespace-nowrap text-slate-700 hover:text-brand-600 font-medium text-xs bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200 transition-colors shrink-0"
             >
-              <Phone className="w-3.5 h-3.5 mr-1 text-brand-600" />
-              +91 7942546295
+              <Phone className="w-3.5 h-3.5 mr-1.5 text-brand-600 shrink-0" />
+              <span>+91 7942546295</span>
             </a>
           </nav>
 
           {/* Action CTAs */}
-          <div className="hidden lg:flex items-center space-x-3">
+          <div className="hidden sm:flex items-center space-x-2.5 xl:space-x-3 shrink-0">
             {userSession ? (
               <Link
                 href={userSession.role === 'ADMIN' ? '/admin/dashboard' : '/customer/dashboard'}
-                className="inline-flex items-center text-xs font-semibold px-3 py-2 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                className="inline-flex items-center whitespace-nowrap text-xs font-semibold px-3 py-2 text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors max-w-[160px] shrink-0"
               >
-                <User className="w-3.5 h-3.5 mr-1.5 text-slate-600" />
-                {userSession.fullName}
+                <User className="w-3.5 h-3.5 mr-1.5 text-slate-600 shrink-0" />
+                <span className="truncate">{userSession.fullName}</span>
               </Link>
             ) : (
               <Link
                 href="/admin/login"
-                className="text-xs font-medium text-slate-500 hover:text-slate-800 transition-colors px-2 py-1"
+                className="text-xs font-medium text-slate-500 hover:text-slate-800 transition-colors px-2 py-1 whitespace-nowrap shrink-0"
               >
                 Admin
               </Link>
@@ -104,19 +104,19 @@ export const Navbar: React.FC = () => {
 
             <Link
               href="/designer"
-              className="inline-flex items-center justify-center text-sm font-bold px-4 py-2.5 text-white bg-brand-500 hover:bg-brand-600 rounded-lg shadow-sm shadow-brand-500/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
+              className="inline-flex items-center justify-center whitespace-nowrap text-xs sm:text-sm font-bold px-3.5 py-2 sm:px-4 sm:py-2 text-white bg-brand-500 hover:bg-brand-600 rounded-lg shadow-sm shadow-brand-500/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0"
             >
-              <Layers className="w-4 h-4 mr-2" />
-              Design My Shop
-              <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+              <Layers className="w-4 h-4 mr-2 shrink-0" />
+              <span>Design My Shop</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-1.5 shrink-0" />
             </Link>
           </div>
 
           {/* Mobile Menu Button */}
-          <div className="flex md:hidden items-center space-x-2">
+          <div className="flex lg:hidden items-center space-x-2">
             <Link
               href="/designer"
-              className="text-xs font-bold px-3 py-1.5 text-white bg-brand-500 rounded-md shadow-sm"
+              className="sm:hidden text-xs font-bold px-3 py-1.5 text-white bg-brand-500 rounded-md shadow-sm whitespace-nowrap"
             >
               Design
             </Link>
@@ -131,7 +131,7 @@ export const Navbar: React.FC = () => {
 
         {/* Mobile Dropdown */}
         {mobileMenuOpen && (
-          <div className="md:hidden pt-4 pb-3 border-t border-slate-100 mt-3 space-y-2">
+          <div className="lg:hidden pt-4 pb-3 border-t border-slate-100 mt-3 space-y-2">
             <Link
               href="/#how-it-works"
               onClick={() => setMobileMenuOpen(false)}
