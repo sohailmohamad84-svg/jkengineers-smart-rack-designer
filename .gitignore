@@ -12,9 +12,10 @@ out/
 build/
 dist/
 
-# Prisma / Local DB
-*.db
+# Prisma / Local DB (dev.db tracked for zero-config cloud deployment)
 *.db-journal
+*.db-wal
+*.db-shm
 
 # Environment variables
 .env
