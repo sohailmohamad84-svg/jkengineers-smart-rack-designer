@@ -297,7 +297,7 @@ export default function CustomerProjectDetailPage() {
 
         {/* 2D Interactive Canvas */}
         <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <div className="min-h-[520px]">
+          <div className="w-full h-[580px]">
             <ShopFloorCanvas
               shop={shopSpec}
               racks={displayedRacks}

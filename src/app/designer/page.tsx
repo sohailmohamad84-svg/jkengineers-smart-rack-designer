@@ -1396,7 +1396,7 @@ export default function DesignerPage() {
                 </div>
               </div>
 
-              <div className="min-h-[520px]">
+              <div className="w-full h-[580px]">
                 <ShopFloorCanvas
                   shop={getShopSpec()}
                   racks={layoutResult.options[activeOptionIndex].racks}

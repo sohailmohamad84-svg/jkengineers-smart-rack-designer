@@ -83,23 +83,61 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Auto-fit canvas on initial render or dimension change
-  useEffect(() => {
-    if (containerRef.current) {
-      const containerWidth = containerRef.current.clientWidth || 800;
-      const containerHeight = containerRef.current.clientHeight || 550;
+  // Auto-fit canvas helper
+  const fitCanvas = useCallback(() => {
+    if (!containerRef.current) return;
+    const containerWidth = containerRef.current.clientWidth || 800;
+    const containerHeight = containerRef.current.clientHeight || 520;
 
-      const scaleX = (containerWidth - 140) / lengthMm;
-      const scaleY = (containerHeight - 140) / breadthMm;
-      const autoScale = Math.min(scaleX, scaleY, 0.18);
+    // Generous clearance padding for dimension text, walls, controls, and legend
+    // Top clearance: ~90px (controls bar at top-16 + length dimension line)
+    // Bottom clearance: ~70px (outer 200mm architectural wall + margin above bottom legend)
+    // Left/Right clearance: ~80px (breadth dimension line + outer walls + margin)
+    const paddingX = 180;
+    const paddingY = 180;
+    const effectiveLength = lengthMm + 400; // includes 200mm outer architectural wall on both sides
+    const effectiveBreadth = breadthMm + 400; // includes 200mm outer architectural wall on both sides
 
-      setScale(Math.max(0.03, autoScale));
-      setPan({
-        x: Math.max(60, (containerWidth - lengthMm * autoScale) / 2),
-        y: Math.max(60, (containerHeight - breadthMm * autoScale) / 2),
-      });
-    }
+    const scaleX = (containerWidth - paddingX) / effectiveLength;
+    const scaleY = (containerHeight - paddingY) / effectiveBreadth;
+    const autoScale = Math.min(Math.max(0.02, Math.min(scaleX, scaleY)), 0.18);
+
+    setScale(autoScale);
+
+    const renderedWidth = lengthMm * autoScale;
+    const renderedHeight = breadthMm * autoScale;
+
+    setPan({
+      x: Math.round((containerWidth - renderedWidth) / 2),
+      y: Math.round(Math.max(80, (containerHeight - renderedHeight) / 2)),
+    });
   }, [lengthMm, breadthMm]);
+
+  // Auto-fit canvas on initial render and dimension change, with ResizeObserver for responsive layout
+  useEffect(() => {
+    fitCanvas();
+
+    const element = containerRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const observer = new ResizeObserver((entries) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        for (const entry of entries) {
+          if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+            fitCanvas();
+          }
+        }
+      }, 150);
+    });
+
+    observer.observe(element);
+    return () => {
+      clearTimeout(timeoutId);
+      observer.disconnect();
+    };
+  }, [fitCanvas]);
 
   // Handle selected rack synchronization
   const selectedRack = selectedRackIndex !== null && racks[selectedRackIndex] ? racks[selectedRackIndex] : null;
@@ -115,19 +153,7 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
   };
 
   const handleResetZoom = () => {
-    if (containerRef.current) {
-      const containerWidth = containerRef.current.clientWidth || 800;
-      const containerHeight = containerRef.current.clientHeight || 550;
-      const autoScale = Math.min(
-        (containerWidth - 140) / lengthMm,
-        (containerHeight - 140) / breadthMm
-      );
-      setScale(autoScale);
-      setPan({
-        x: (containerWidth - lengthMm * autoScale) / 2,
-        y: (containerHeight - breadthMm * autoScale) / 2,
-      });
-    }
+    fitCanvas();
   };
 
   // Canvas Mouse / Touch Down (Pan)
@@ -135,6 +161,60 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
     if (draggingRackIndex !== null) return;
     setIsPanning(true);
     setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (draggingRackIndex !== null) return;
+    if (e.touches.length === 1) {
+      setIsPanning(true);
+      setPanStart({ x: e.touches[0].clientX - pan.x, y: e.touches[0].clientY - pan.y });
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+
+    if (draggingRackIndex !== null && isArrangeMode) {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const mouseX = touch.clientX - rect.left;
+      const mouseY = touch.clientY - rect.top;
+      const mmX = (mouseX - pan.x) / scale;
+      const mmY = (mouseY - pan.y) / scale;
+
+      const rawCandidateX = mmX - dragOffsetMm.x;
+      const rawCandidateY = mmY - dragOffsetMm.y;
+
+      const snappedX = PlacementValidator.snapToGrid(rawCandidateX, gridSizeMm);
+      const snappedY = PlacementValidator.snapToGrid(rawCandidateY, gridSizeMm);
+
+      const activeRack = racks[draggingRackIndex];
+      const updatedCandidate: PlacedRack = {
+        ...activeRack,
+        posX: snappedX,
+        posY: snappedY,
+      };
+
+      const validation = PlacementValidator.validateRackPlacement(
+        updatedCandidate,
+        racks,
+        shop,
+        draggingRackIndex
+      );
+
+      setCandidateRack(updatedCandidate);
+      setCandidateValidation(validation);
+      return;
+    }
+
+    if (isPanning) {
+      setPan({
+        x: touch.clientX - panStart.x,
+        y: touch.clientY - panStart.y,
+      });
+    }
   };
 
   // Canvas Mouse Move (Pan OR Rack Drag)
@@ -373,7 +453,7 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full min-h-[520px] bg-slate-900 rounded-xl overflow-hidden select-none border border-slate-700 shadow-xl flex flex-col">
+    <div className="relative w-full h-[580px] min-h-[520px] bg-slate-900 rounded-xl overflow-hidden select-none border border-slate-700 shadow-xl flex flex-col">
       {/* Arrange Mode Toolbar */}
       <ArrangeToolbar
         isArrangeMode={isArrangeMode}
@@ -475,7 +555,10 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        className={`w-full flex-1 relative overflow-hidden ${
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleMouseUp}
+        className={`w-full flex-1 relative overflow-hidden min-h-[420px] ${
           draggingRackIndex !== null
             ? 'cursor-grabbing'
             : isArrangeMode
@@ -483,10 +566,7 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
             : 'cursor-grab active:cursor-grabbing'
         }`}
       >
-        <svg
-          className="w-full h-full"
-          style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}
-        >
+        <svg className="absolute inset-0 w-full h-full block">
           {/* Pattern Definitions */}
           <defs>
             <pattern
@@ -515,19 +595,21 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
             </pattern>
           </defs>
 
-          {/* Grid Background */}
-          {showGrid && (
-            <rect
-              x="-2000"
-              y="-2000"
-              width={lengthMm * scale + 4000}
-              height={breadthMm * scale + 4000}
-              fill="url(#grid)"
-            />
-          )}
+          {/* Master Viewport Pan Group */}
+          <g transform={`translate(${pan.x}, ${pan.y})`}>
+            {/* Grid Background */}
+            {showGrid && (
+              <rect
+                x="-5000"
+                y="-5000"
+                width={lengthMm * scale + 10000}
+                height={breadthMm * scale + 10000}
+                fill="url(#grid)"
+              />
+            )}
 
-          {/* Shop Floor Polygon */}
-          <g>
+            {/* Shop Floor Polygon */}
+            <g>
             {/* Usable Floor Interior */}
             <rect
               x={0}
@@ -865,8 +947,9 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
               </g>
             )}
           </g>
-        </svg>
-      </div>
+        </g>
+      </svg>
+    </div>
 
       {/* Canvas Bottom Legend & Quick Stats */}
       <div className="bg-slate-950 border-t border-slate-800 px-4 py-2.5 flex flex-wrap items-center justify-between text-xs text-slate-400 z-10 gap-2">

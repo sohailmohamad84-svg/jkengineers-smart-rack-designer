@@ -362,7 +362,7 @@ export default function AdminCustomerDetailPage() {
               </div>
 
               {/* 2D Canvas */}
-              <div className="h-[480px]">
+              <div className="w-full h-[580px]">
                 <ShopFloorCanvas
                   shop={shopSpec}
                   racks={racks}
