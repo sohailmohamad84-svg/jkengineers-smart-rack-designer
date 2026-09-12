@@ -1040,15 +1040,19 @@ export const ShopFloor3DCanvas: React.FC<ShopFloor3DCanvasProps> = ({
       const isSelected = selectedRackIndex === idx;
       const rackGroup = buildRack3DGroup(rack, idx, isSelected);
 
-      // Map (posX, posY) in mm to Three.js centered space
-      const rX = (rack.posX + rack.widthMm / 2 - lengthMm / 2) / 1000;
-      const rZ = (rack.posY + rack.depthMm / 2 - breadthMm / 2) / 1000;
+      // Map (posX, posY) in mm to Three.js centered space accounting for rotation
+      const isRotated = rack.rotation === 90 || rack.rotation === 270;
+      const effectiveWidth = isRotated ? rack.depthMm : rack.widthMm;
+      const effectiveDepth = isRotated ? rack.widthMm : rack.depthMm;
+
+      const rX = (rack.posX + effectiveWidth / 2 - lengthMm / 2) / 1000;
+      const rZ = (rack.posY + effectiveDepth / 2 - breadthMm / 2) / 1000;
 
       rackGroup.position.set(rX, 0, rZ);
 
-      // Rotation around Y axis
+      // Rotation around Y axis (standard right-hand rule in Three.js)
       const rotRad = ((rack.rotation || 0) * Math.PI) / 180;
-      rackGroup.rotation.y = -rotRad;
+      rackGroup.rotation.y = rotRad;
 
       scene.add(rackGroup);
       rackMeshesMapRef.current.set(idx, rackGroup);
