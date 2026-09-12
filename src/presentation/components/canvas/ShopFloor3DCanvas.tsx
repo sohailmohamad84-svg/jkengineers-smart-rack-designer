@@ -4,12 +4,12 @@ import React, { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { PlacedRack } from '@/domain/entities/Rack';
-import { ShopSpecification } from '@/domain/entities/Shop';
+import { ShopSpecification, ShopOpening } from '@/domain/entities/Shop';
 import {
   RotateCcw,
   Compass,
   Eye,
-  Box,
+  DoorOpen,
   Sparkles,
   Layers,
   X,
@@ -93,6 +93,519 @@ export const ShopFloor3DCanvas: React.FC<ShopFloor3DCanvasProps> = ({
     texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(lengthM / 0.6, breadthM / 0.6); // 600mm x 600mm tiles
     return texture;
+  };
+
+  // Generate high-resolution backlit sign texture (ENTRANCE / EXIT)
+  const createSignTexture = (title: string, subtext: string, isEntrance: boolean) => {
+    if (typeof document === 'undefined') return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // Gradient background
+    const grad = ctx.createLinearGradient(0, 0, 512, 128);
+    if (isEntrance) {
+      grad.addColorStop(0, '#064e3b');
+      grad.addColorStop(0.5, '#059669');
+      grad.addColorStop(1, '#047857');
+    } else {
+      grad.addColorStop(0, '#7f1d1d');
+      grad.addColorStop(0.5, '#dc2626');
+      grad.addColorStop(1, '#991b1b');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 128);
+
+    // Glowing border
+    ctx.strokeStyle = isEntrance ? '#34d399' : '#f87171';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(4, 4, 504, 120);
+
+    // Inner subtle border
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(10, 10, 492, 108);
+
+    // Main Title Text
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 42px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(title, 256, 48);
+
+    // Subtitle
+    ctx.fillStyle = isEntrance ? '#a7f3d0' : '#fecaca';
+    ctx.font = '600 18px sans-serif';
+    ctx.fillText(subtext, 256, 92);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+  };
+
+  // Build a realistic commercial 3D door assembly with jambs, threshold, glass leaf, handle, sign & swing arc
+  const buildDoorAssembly = (op: ShopOpening, wallThickness: number) => {
+    const doorGroup = new THREE.Group();
+    const opW = op.widthMm / 1000;
+    const doorH = 2.15; // 2150mm commercial doorway height
+    const jambW = 0.06; // 60mm aluminum post
+    const jambD = wallThickness + 0.03; // slightly wider than wall
+
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      metalness: 0.65,
+      roughness: 0.35,
+    });
+
+    const brushedAlumMat = new THREE.MeshStandardMaterial({
+      color: 0xcfd8dc,
+      metalness: 0.85,
+      roughness: 0.25,
+    });
+
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0x93c5fd,
+      transparent: true,
+      opacity: 0.45,
+      roughness: 0.1,
+      metalness: 0.1,
+    });
+
+    const handleMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      metalness: 0.95,
+      roughness: 0.08,
+    });
+
+    // 1. Left Jamb
+    const leftJamb = new THREE.Mesh(new THREE.BoxGeometry(jambW, doorH, jambD), frameMat);
+    leftJamb.position.set(-opW / 2 + jambW / 2, doorH / 2, 0);
+    leftJamb.castShadow = true;
+    doorGroup.add(leftJamb);
+
+    // 2. Right Jamb
+    const rightJamb = new THREE.Mesh(new THREE.BoxGeometry(jambW, doorH, jambD), frameMat);
+    rightJamb.position.set(opW / 2 - jambW / 2, doorH / 2, 0);
+    rightJamb.castShadow = true;
+    doorGroup.add(rightJamb);
+
+    // 3. Header Transom Beam
+    const headerH = jambW + 0.02;
+    const header = new THREE.Mesh(new THREE.BoxGeometry(opW, headerH, jambD), frameMat);
+    header.position.set(0, doorH - headerH / 2, 0);
+    header.castShadow = true;
+    doorGroup.add(header);
+
+    // 4. Floor Threshold Plate
+    const thresh = new THREE.Mesh(new THREE.BoxGeometry(opW, 0.014, jambD), brushedAlumMat);
+    thresh.position.set(0, 0.007, 0);
+    thresh.receiveShadow = true;
+    doorGroup.add(thresh);
+
+    // 5. Welcome Floor Entry Mat (inside the store, local +Z)
+    const matW = Math.max(0.6, opW * 0.85);
+    const matD = 0.75;
+    const matMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(matW, 0.006, matD),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 })
+    );
+    matMesh.position.set(0, 0.004, matD / 2 + 0.05);
+    matMesh.receiveShadow = true;
+    doorGroup.add(matMesh);
+
+    // Mat border trim
+    const trimMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(matW + 0.03, 0.004, matD + 0.03),
+      new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5 })
+    );
+    trimMesh.position.set(0, 0.002, matD / 2 + 0.05);
+    doorGroup.add(trimMesh);
+
+    // 6. Illuminated Backlit Overhead Lightbox Sign
+    const isEntrance = op.type === 'DOOR_MAIN' || op.type === 'DOOR_ADDITIONAL';
+    const signTitle =
+      op.type === 'DOOR_MAIN' ? 'ENTRANCE ➔' : op.type === 'DOOR_EXIT' ? 'EMERGENCY EXIT' : 'SERVICE DOOR';
+    const signSub =
+      op.type === 'DOOR_MAIN' ? 'JK ENGINEERS WORKS' : op.type === 'DOOR_EXIT' ? 'WAY OUT' : 'STAFF ENTRY';
+
+    const signW = Math.max(0.8, opW * 0.88);
+    const signH = 0.22;
+    const signD = 0.12;
+    const signY = doorH + signH / 2 + 0.01;
+
+    // Housing Box
+    const signBox = new THREE.Mesh(
+      new THREE.BoxGeometry(signW, signH, signD),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.7, roughness: 0.3 })
+    );
+    signBox.position.set(0, signY, 0);
+    doorGroup.add(signBox);
+
+    // Textured Sign Faces
+    const signTex = createSignTexture(signTitle, signSub, isEntrance);
+    const signFaceMat = new THREE.MeshStandardMaterial({
+      color: isEntrance ? 0x059669 : 0xdc2626,
+      map: signTex || undefined,
+      emissive: isEntrance ? 0x047857 : 0x991b1b,
+      emissiveIntensity: 0.65,
+      roughness: 0.3,
+    });
+
+    const faceGeo = new THREE.PlaneGeometry(signW - 0.02, signH - 0.02);
+    // Outer Face (facing exterior -Z)
+    const outerFace = new THREE.Mesh(faceGeo, signFaceMat);
+    outerFace.rotation.y = Math.PI;
+    outerFace.position.set(0, signY, -signD / 2 - 0.001);
+    doorGroup.add(outerFace);
+
+    // Inner Face (facing interior +Z)
+    const innerFace = new THREE.Mesh(faceGeo, signFaceMat);
+    innerFace.position.set(0, signY, signD / 2 + 0.001);
+    doorGroup.add(innerFace);
+
+    // Accent LED downlight glow under sign
+    const signLight = new THREE.PointLight(isEntrance ? 0x34d399 : 0xf87171, 0.4, 2.5);
+    signLight.position.set(0, doorH + 0.02, 0);
+    doorGroup.add(signLight);
+
+    // 7. Commercial Glass Door Leaf (Swung Open)
+    const isDoubleDoor = opW >= 1.6;
+    const clearLeafH = doorH - headerH - 0.03; // ~2.04m
+
+    if (!isDoubleDoor) {
+      // Single Leaf Door (hinged at left jamb)
+      const leafW = opW - jambW * 2 - 0.02;
+      const hingeX = -opW / 2 + jambW + 0.01;
+
+      const doorPivotGroup = new THREE.Group();
+      doorPivotGroup.position.set(hingeX, 0, 0);
+
+      // Swung open 45 degrees inward into the store
+      const swingIn = op.swingDirection !== 'OUTSIDE';
+      doorPivotGroup.rotation.y = swingIn ? Math.PI / 4 : -Math.PI / 4;
+
+      const leafGroup = new THREE.Group();
+
+      // Bottom Kickplate
+      const kickH = 0.16;
+      const kickMesh = new THREE.Mesh(new THREE.BoxGeometry(leafW, kickH, 0.04), brushedAlumMat);
+      kickMesh.position.set(leafW / 2, 0.015 + kickH / 2, 0);
+      leafGroup.add(kickMesh);
+
+      // Top Rail
+      const topRailH = 0.08;
+      const topRail = new THREE.Mesh(new THREE.BoxGeometry(leafW, topRailH, 0.04), frameMat);
+      topRail.position.set(leafW / 2, 0.015 + clearLeafH - topRailH / 2, 0);
+      leafGroup.add(topRail);
+
+      // Stiles
+      const stileW = 0.055;
+      const stileH = clearLeafH - kickH - topRailH;
+      const stileGeo = new THREE.BoxGeometry(stileW, stileH, 0.04);
+      const leftStile = new THREE.Mesh(stileGeo, frameMat);
+      leftStile.position.set(stileW / 2, 0.015 + kickH + stileH / 2, 0);
+      leafGroup.add(leftStile);
+
+      const rightStile = new THREE.Mesh(stileGeo, frameMat);
+      rightStile.position.set(leafW - stileW / 2, 0.015 + kickH + stileH / 2, 0);
+      leafGroup.add(rightStile);
+
+      // Glass Pane
+      const glassW = leafW - stileW * 2;
+      const glassMesh = new THREE.Mesh(new THREE.BoxGeometry(glassW, stileH, 0.01), glassMat);
+      glassMesh.position.set(leafW / 2, 0.015 + kickH + stileH / 2, 0);
+      leafGroup.add(glassMesh);
+
+      // Vertical Tubular Pull Handle
+      const handleH = 0.9;
+      const handleR = 0.014;
+      const handleGeo = new THREE.CylinderGeometry(handleR, handleR, handleH, 16);
+
+      const handleOut = new THREE.Mesh(handleGeo, handleMat);
+      handleOut.position.set(leafW - stileW * 1.5, 0.015 + kickH + stileH * 0.45, -0.038);
+      leafGroup.add(handleOut);
+
+      const handleIn = new THREE.Mesh(handleGeo, handleMat);
+      handleIn.position.set(leafW - stileW * 1.5, 0.015 + kickH + stileH * 0.45, 0.038);
+      leafGroup.add(handleIn);
+
+      const pinGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.08, 12);
+      const topPin = new THREE.Mesh(pinGeo, handleMat);
+      topPin.rotation.x = Math.PI / 2;
+      topPin.position.set(leafW - stileW * 1.5, 0.015 + kickH + stileH * 0.45 + handleH * 0.38, 0);
+      leafGroup.add(topPin);
+
+      const botPin = new THREE.Mesh(pinGeo, handleMat);
+      botPin.rotation.x = Math.PI / 2;
+      botPin.position.set(leafW - stileW * 1.5, 0.015 + kickH + stileH * 0.45 - handleH * 0.38, 0);
+      leafGroup.add(botPin);
+
+      doorPivotGroup.add(leafGroup);
+      doorGroup.add(doorPivotGroup);
+
+      // 8. Architectural CAD Floor Swing Arc
+      const arcSegments = 24;
+      const arcPositions: number[] = [];
+      const fanIndices: number[] = [];
+      const fanVertices: number[] = [hingeX, 0.004, 0];
+
+      for (let i = 0; i <= arcSegments; i++) {
+        const theta = (i / arcSegments) * (Math.PI / 2);
+        const px = hingeX + leafW * Math.cos(theta);
+        const pz = leafW * Math.sin(theta);
+        arcPositions.push(px, 0.005, pz);
+        fanVertices.push(px, 0.004, pz);
+        if (i > 0) {
+          fanIndices.push(0, i, i + 1);
+        }
+      }
+
+      const arcLineGeo = new THREE.BufferGeometry();
+      arcLineGeo.setAttribute('position', new THREE.Float32BufferAttribute(arcPositions, 3));
+      const arcLineMat = new THREE.LineDashedMaterial({
+        color: 0x10b981,
+        dashSize: 0.06,
+        gapSize: 0.04,
+        linewidth: 2,
+      });
+      const arcLine = new THREE.Line(arcLineGeo, arcLineMat);
+      arcLine.computeLineDistances();
+      doorGroup.add(arcLine);
+
+      const fanGeo = new THREE.BufferGeometry();
+      fanGeo.setAttribute('position', new THREE.Float32BufferAttribute(fanVertices, 3));
+      fanGeo.setIndex(fanIndices);
+      fanGeo.computeVertexNormals();
+      const fanMat = new THREE.MeshBasicMaterial({
+        color: 0x10b981,
+        transparent: true,
+        opacity: 0.08,
+        side: THREE.DoubleSide,
+      });
+      const fanMesh = new THREE.Mesh(fanGeo, fanMat);
+      doorGroup.add(fanMesh);
+    } else {
+      // Double Leaf Door (for wide entrances >= 1.6m)
+      const leafW = (opW - jambW * 2 - 0.04) / 2;
+      const swingAngle = Math.PI / 4.5;
+
+      const leftPivotGroup = new THREE.Group();
+      leftPivotGroup.position.set(-opW / 2 + jambW + 0.01, 0, 0);
+      leftPivotGroup.rotation.y = swingAngle;
+
+      const rightPivotGroup = new THREE.Group();
+      rightPivotGroup.position.set(opW / 2 - jambW - 0.01, 0, 0);
+      rightPivotGroup.rotation.y = -swingAngle;
+
+      const buildLeaf = (isRight: boolean) => {
+        const lg = new THREE.Group();
+        const dir = isRight ? -1 : 1;
+
+        const kickH = 0.16;
+        const kickMesh = new THREE.Mesh(new THREE.BoxGeometry(leafW, kickH, 0.04), brushedAlumMat);
+        kickMesh.position.set((leafW / 2) * dir, 0.015 + kickH / 2, 0);
+        lg.add(kickMesh);
+
+        const topRailH = 0.08;
+        const topRail = new THREE.Mesh(new THREE.BoxGeometry(leafW, topRailH, 0.04), frameMat);
+        topRail.position.set((leafW / 2) * dir, 0.015 + clearLeafH - topRailH / 2, 0);
+        lg.add(topRail);
+
+        const stileW = 0.055;
+        const stileH = clearLeafH - kickH - topRailH;
+        const stileGeo = new THREE.BoxGeometry(stileW, stileH, 0.04);
+        const s1 = new THREE.Mesh(stileGeo, frameMat);
+        s1.position.set((stileW / 2) * dir, 0.015 + kickH + stileH / 2, 0);
+        lg.add(s1);
+
+        const s2 = new THREE.Mesh(stileGeo, frameMat);
+        s2.position.set((leafW - stileW / 2) * dir, 0.015 + kickH + stileH / 2, 0);
+        lg.add(s2);
+
+        const glassW = leafW - stileW * 2;
+        const glassMesh = new THREE.Mesh(new THREE.BoxGeometry(glassW, stileH, 0.01), glassMat);
+        glassMesh.position.set((leafW / 2) * dir, 0.015 + kickH + stileH / 2, 0);
+        lg.add(glassMesh);
+
+        const handleH = 0.8;
+        const handleR = 0.013;
+        const handleGeo = new THREE.CylinderGeometry(handleR, handleR, handleH, 16);
+        const hOut = new THREE.Mesh(handleGeo, handleMat);
+        hOut.position.set((leafW - stileW * 1.5) * dir, 0.015 + kickH + stileH * 0.45, -0.038);
+        lg.add(hOut);
+
+        const hIn = new THREE.Mesh(handleGeo, handleMat);
+        hIn.position.set((leafW - stileW * 1.5) * dir, 0.015 + kickH + stileH * 0.45, 0.038);
+        lg.add(hIn);
+
+        return lg;
+      };
+
+      leftPivotGroup.add(buildLeaf(false));
+      rightPivotGroup.add(buildLeaf(true));
+      doorGroup.add(leftPivotGroup);
+      doorGroup.add(rightPivotGroup);
+    }
+
+    return doorGroup;
+  };
+
+  // Build a realistic commercial 3D window assembly
+  const buildWindowAssembly = (op: ShopOpening, wallThickness: number) => {
+    const windowGroup = new THREE.Group();
+    const opW = op.widthMm / 1000;
+    const sillH = 0.85;
+    const winH = 0.65;
+    const frameThickness = 0.04;
+
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      metalness: 0.6,
+      roughness: 0.4,
+    });
+
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.35,
+      roughness: 0.1,
+      metalness: 0.15,
+    });
+
+    // Frame Bottom & Top
+    const botFrame = new THREE.Mesh(new THREE.BoxGeometry(opW, frameThickness, wallThickness + 0.02), frameMat);
+    botFrame.position.set(0, sillH + frameThickness / 2, 0);
+    windowGroup.add(botFrame);
+
+    const topFrame = new THREE.Mesh(new THREE.BoxGeometry(opW, frameThickness, wallThickness + 0.02), frameMat);
+    topFrame.position.set(0, sillH + winH - frameThickness / 2, 0);
+    windowGroup.add(topFrame);
+
+    // Frame Sides & Center Mullion
+    const sideGeo = new THREE.BoxGeometry(frameThickness, winH, wallThickness + 0.02);
+    const leftSide = new THREE.Mesh(sideGeo, frameMat);
+    leftSide.position.set(-opW / 2 + frameThickness / 2, sillH + winH / 2, 0);
+    windowGroup.add(leftSide);
+
+    const rightSide = new THREE.Mesh(sideGeo, frameMat);
+    rightSide.position.set(opW / 2 - frameThickness / 2, sillH + winH / 2, 0);
+    windowGroup.add(rightSide);
+
+    const centerMullion = new THREE.Mesh(sideGeo, frameMat);
+    centerMullion.position.set(0, sillH + winH / 2, 0);
+    windowGroup.add(centerMullion);
+
+    // Panes
+    const paneW = (opW - frameThickness * 3) / 2;
+    const paneGeo = new THREE.BoxGeometry(paneW, winH - frameThickness * 2, 0.01);
+    const leftPane = new THREE.Mesh(paneGeo, glassMat);
+    leftPane.position.set(-paneW / 2 - frameThickness / 2, sillH + winH / 2, 0);
+    windowGroup.add(leftPane);
+
+    const rightPane = new THREE.Mesh(paneGeo, glassMat);
+    rightPane.position.set(paneW / 2 + frameThickness / 2, sillH + winH / 2, 0);
+    windowGroup.add(rightPane);
+
+    // Projected Sill Ledge
+    const ledgeGeo = new THREE.BoxGeometry(opW + 0.04, 0.025, wallThickness + 0.06);
+    const ledgeMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.5 });
+    const ledge = new THREE.Mesh(ledgeGeo, ledgeMat);
+    ledge.position.set(0, sillH + 0.01, 0);
+    windowGroup.add(ledge);
+
+    return windowGroup;
+  };
+
+  // Build segmented walls with physical cutouts for openings
+  const buildSegmentedWall = (
+    wallLength: number,
+    wallHeight: number,
+    wallThickness: number,
+    wallMat: THREE.Material,
+    openingsOnWall: { start: number; end: number; type: string }[],
+    isXAxis: boolean,
+    wallBasePos: { x: number; y: number; z: number }
+  ) => {
+    const wallGroup = new THREE.Group();
+
+    const sorted = [...openingsOnWall]
+      .map((o) => ({
+        start: Math.max(0, Math.min(wallLength, o.start)),
+        end: Math.max(0, Math.min(wallLength, o.end)),
+        type: o.type,
+      }))
+      .filter((o) => o.end > o.start)
+      .sort((a, b) => a.start - b.start);
+
+    let currentPos = 0;
+
+    sorted.forEach((op) => {
+      // Solid wall before opening
+      const segLen = op.start - currentPos;
+      if (segLen > 0.005) {
+        const segGeo = isXAxis
+          ? new THREE.BoxGeometry(segLen, wallHeight, wallThickness)
+          : new THREE.BoxGeometry(wallThickness, wallHeight, segLen);
+        const segMesh = new THREE.Mesh(segGeo, wallMat);
+        segMesh.castShadow = true;
+        segMesh.receiveShadow = true;
+
+        const centerAlong = currentPos + segLen / 2 - wallLength / 2;
+        if (isXAxis) {
+          segMesh.position.set(wallBasePos.x + centerAlong, wallBasePos.y + wallHeight / 2, wallBasePos.z);
+        } else {
+          segMesh.position.set(wallBasePos.x, wallBasePos.y + wallHeight / 2, wallBasePos.z + centerAlong);
+        }
+        wallGroup.add(segMesh);
+      }
+
+      // If WINDOW: build sill wall underneath window
+      if (op.type === 'WINDOW') {
+        const sillH = 0.85;
+        const opLen = op.end - op.start;
+        if (opLen > 0.005) {
+          const sillGeo = isXAxis
+            ? new THREE.BoxGeometry(opLen, sillH, wallThickness)
+            : new THREE.BoxGeometry(wallThickness, sillH, opLen);
+          const sillMesh = new THREE.Mesh(sillGeo, wallMat);
+          sillMesh.castShadow = true;
+          sillMesh.receiveShadow = true;
+
+          const centerAlong = op.start + opLen / 2 - wallLength / 2;
+          if (isXAxis) {
+            sillMesh.position.set(wallBasePos.x + centerAlong, wallBasePos.y + sillH / 2, wallBasePos.z);
+          } else {
+            sillMesh.position.set(wallBasePos.x, wallBasePos.y + sillH / 2, wallBasePos.z + centerAlong);
+          }
+          wallGroup.add(sillMesh);
+        }
+      }
+      // If DOOR: NO wall in the gap! Complete walk-through opening!
+
+      currentPos = Math.max(currentPos, op.end);
+    });
+
+    // Solid wall after last opening
+    const remLen = wallLength - currentPos;
+    if (remLen > 0.005) {
+      const segGeo = isXAxis
+        ? new THREE.BoxGeometry(remLen, wallHeight, wallThickness)
+        : new THREE.BoxGeometry(wallThickness, wallHeight, remLen);
+      const segMesh = new THREE.Mesh(segGeo, wallMat);
+      segMesh.castShadow = true;
+      segMesh.receiveShadow = true;
+
+      const centerAlong = currentPos + remLen / 2 - wallLength / 2;
+      if (isXAxis) {
+        segMesh.position.set(wallBasePos.x + centerAlong, wallBasePos.y + wallHeight / 2, wallBasePos.z);
+      } else {
+        segMesh.position.set(wallBasePos.x, wallBasePos.y + wallHeight / 2, wallBasePos.z + centerAlong);
+      }
+      wallGroup.add(segMesh);
+    }
+
+    return wallGroup;
   };
 
   // Build a realistic 3D procedural steel rack unit
@@ -371,7 +884,7 @@ export const ShopFloor3DCanvas: React.FC<ShopFloor3DCanvasProps> = ({
     outerGround.receiveShadow = true;
     scene.add(outerGround);
 
-    // Architectural Outer Walls (Cutaway style at 1.4m so interior is never blocked from view)
+    // Architectural Outer Walls with Openings Cutouts (Cutaway style at 1.4m so interior is never blocked)
     const wallH = 1.4;
     const wallThickness = 0.2; // 200mm
     const wallMat = new THREE.MeshStandardMaterial({
@@ -380,39 +893,116 @@ export const ShopFloor3DCanvas: React.FC<ShopFloor3DCanvasProps> = ({
       metalness: 0.1,
     });
 
-    // North Wall (Z = -breadthM/2)
-    const northGeo = new THREE.BoxGeometry(lengthM + wallThickness * 2, wallH, wallThickness);
-    const northWall = new THREE.Mesh(northGeo, wallMat);
-    northWall.position.set(0, wallH / 2, -breadthM / 2 - wallThickness / 2);
-    northWall.castShadow = true;
-    northWall.receiveShadow = true;
-    scene.add(northWall);
+    // Segregate openings by wall
+    const northOps = shop.openings.filter((o) => o.wall === 'NORTH');
+    const southOps = shop.openings.filter((o) => o.wall === 'SOUTH');
+    const westOps = shop.openings.filter((o) => o.wall === 'WEST');
+    const eastOps = shop.openings.filter((o) => o.wall === 'EAST');
 
-    // South Wall (Z = +breadthM/2)
-    const southGeo = new THREE.BoxGeometry(lengthM + wallThickness * 2, wallH, wallThickness);
-    const southWall = new THREE.Mesh(southGeo, wallMat);
-    southWall.position.set(0, wallH / 2, breadthM / 2 + wallThickness / 2);
-    southWall.castShadow = true;
-    southWall.receiveShadow = true;
-    scene.add(southWall);
+    // North Wall: Spans X from -lengthM/2 - wallThickness to +lengthM/2 + wallThickness
+    const northWallGroup = buildSegmentedWall(
+      lengthM + wallThickness * 2,
+      wallH,
+      wallThickness,
+      wallMat,
+      northOps.map((o) => ({
+        start: wallThickness + o.distanceMm / 1000,
+        end: wallThickness + (o.distanceMm + o.widthMm) / 1000,
+        type: o.type,
+      })),
+      true,
+      { x: 0, y: 0, z: -breadthM / 2 - wallThickness / 2 }
+    );
+    scene.add(northWallGroup);
 
-    // West Wall (X = -lengthM/2)
-    const westGeo = new THREE.BoxGeometry(wallThickness, wallH, breadthM);
-    const westWall = new THREE.Mesh(westGeo, wallMat);
-    westWall.position.set(-lengthM / 2 - wallThickness / 2, wallH / 2, 0);
-    westWall.castShadow = true;
-    westWall.receiveShadow = true;
-    scene.add(westWall);
+    // South Wall: Spans X from -lengthM/2 - wallThickness to +lengthM/2 + wallThickness
+    const southWallGroup = buildSegmentedWall(
+      lengthM + wallThickness * 2,
+      wallH,
+      wallThickness,
+      wallMat,
+      southOps.map((o) => ({
+        start: wallThickness + o.distanceMm / 1000,
+        end: wallThickness + (o.distanceMm + o.widthMm) / 1000,
+        type: o.type,
+      })),
+      true,
+      { x: 0, y: 0, z: breadthM / 2 + wallThickness / 2 }
+    );
+    scene.add(southWallGroup);
 
-    // East Wall (X = +lengthM/2)
-    const eastGeo = new THREE.BoxGeometry(wallThickness, wallH, breadthM);
-    const eastWall = new THREE.Mesh(eastGeo, wallMat);
-    eastWall.position.set(lengthM / 2 + wallThickness / 2, wallH / 2, 0);
-    eastWall.castShadow = true;
-    eastWall.receiveShadow = true;
-    scene.add(eastWall);
+    // West Wall: Spans Z from -breadthM/2 to +breadthM/2
+    const westWallGroup = buildSegmentedWall(
+      breadthM,
+      wallH,
+      wallThickness,
+      wallMat,
+      westOps.map((o) => ({
+        start: o.distanceMm / 1000,
+        end: (o.distanceMm + o.widthMm) / 1000,
+        type: o.type,
+      })),
+      false,
+      { x: -lengthM / 2 - wallThickness / 2, y: 0, z: 0 }
+    );
+    scene.add(westWallGroup);
 
-    // 7. Structural Pillars / Obstacles
+    // East Wall: Spans Z from -breadthM/2 to +breadthM/2
+    const eastWallGroup = buildSegmentedWall(
+      breadthM,
+      wallH,
+      wallThickness,
+      wallMat,
+      eastOps.map((o) => ({
+        start: o.distanceMm / 1000,
+        end: (o.distanceMm + o.widthMm) / 1000,
+        type: o.type,
+      })),
+      false,
+      { x: lengthM / 2 + wallThickness / 2, y: 0, z: 0 }
+    );
+    scene.add(eastWallGroup);
+
+    // Openings Assemblies: Commercial Doors & Windows with Frame, Signage, Glass Leaf & Handles
+    shop.openings.forEach((op) => {
+      const isDoor =
+        op.type === 'DOOR_MAIN' ||
+        op.type === 'DOOR_EXIT' ||
+        op.type === 'DOOR_ADDITIONAL' ||
+        op.type.includes('DOOR');
+
+      const assembly = isDoor
+        ? buildDoorAssembly(op, wallThickness)
+        : buildWindowAssembly(op, wallThickness);
+
+      let dX = 0,
+        dZ = 0,
+        rotY = 0;
+
+      if (op.wall === 'NORTH') {
+        dX = (op.distanceMm + op.widthMm / 2 - lengthMm / 2) / 1000;
+        dZ = -breadthM / 2;
+        rotY = 0;
+      } else if (op.wall === 'SOUTH') {
+        dX = (op.distanceMm + op.widthMm / 2 - lengthMm / 2) / 1000;
+        dZ = breadthM / 2;
+        rotY = Math.PI;
+      } else if (op.wall === 'WEST') {
+        dX = -lengthM / 2;
+        dZ = (op.distanceMm + op.widthMm / 2 - breadthMm / 2) / 1000;
+        rotY = -Math.PI / 2;
+      } else if (op.wall === 'EAST') {
+        dX = lengthM / 2;
+        dZ = (op.distanceMm + op.widthMm / 2 - breadthMm / 2) / 1000;
+        rotY = Math.PI / 2;
+      }
+
+      assembly.position.set(dX, 0, dZ);
+      assembly.rotation.y = rotY;
+      scene.add(assembly);
+    });
+
+    // Structural Pillars / Obstacles
     shop.obstacles.forEach((obs) => {
       const obsW = obs.widthMm / 1000;
       const obsD = obs.depthMm / 1000;
@@ -442,39 +1032,6 @@ export const ShopFloor3DCanvas: React.FC<ShopFloor3DCanvasProps> = ({
       const band = new THREE.Mesh(bandGeo, bandMat);
       band.position.set(pX, 1.1, pZ);
       scene.add(band);
-    });
-
-    // 8. Openings: Entrance Sign & Window Portals
-    shop.openings.forEach((op) => {
-      if (op.type === 'DOOR_MAIN' || op.type === 'DOOR_EXIT') {
-        const opW = op.widthMm / 1000;
-        let dX = 0, dZ = 0;
-        if (op.wall === 'NORTH') {
-          dX = (op.distanceMm + op.widthMm / 2 - lengthMm / 2) / 1000;
-          dZ = -breadthM / 2;
-        } else if (op.wall === 'SOUTH') {
-          dX = (op.distanceMm + op.widthMm / 2 - lengthMm / 2) / 1000;
-          dZ = breadthM / 2;
-        } else if (op.wall === 'WEST') {
-          dX = -lengthM / 2;
-          dZ = (op.distanceMm + op.widthMm / 2 - breadthMm / 2) / 1000;
-        } else if (op.wall === 'EAST') {
-          dX = lengthM / 2;
-          dZ = (op.distanceMm + op.widthMm / 2 - breadthMm / 2) / 1000;
-        }
-
-        // Illuminated Door Portal Arch
-        const archH = 2.4;
-        const archGeo = new THREE.BoxGeometry(opW, 0.2, 0.24);
-        const archMat = new THREE.MeshStandardMaterial({
-          color: op.type === 'DOOR_MAIN' ? 0x059669 : 0x0284c7,
-          emissive: op.type === 'DOOR_MAIN' ? 0x047857 : 0x0369a1,
-          emissiveIntensity: 0.5,
-        });
-        const arch = new THREE.Mesh(archGeo, archMat);
-        arch.position.set(dX, archH, dZ);
-        scene.add(arch);
-      }
     });
 
     // 9. Procedural 3D Modular Racks
@@ -561,7 +1118,42 @@ export const ShopFloor3DCanvas: React.FC<ShopFloor3DCanvasProps> = ({
       controls.dispose();
       renderer.dispose();
     };
-  }, [lengthMm, breadthMm, racks, selectedRackIndex, onSelectRack]);
+  }, [lengthMm, breadthMm, shop.openings, shop.obstacles, racks, selectedRackIndex, onSelectRack]);
+
+  // Compute primary entrance coordinates and orientation for smart camera framing
+  const getMainEntranceCoords = () => {
+    const mainEntrance =
+      shop.openings.find((o) => o.type === 'DOOR_MAIN') ||
+      shop.openings.find((o) => o.type === 'DOOR_EXIT' || o.type === 'DOOR_ADDITIONAL' || o.type.includes('DOOR')) ||
+      shop.openings[0];
+
+    if (!mainEntrance) {
+      return { pos: { x: 0, y: 1.2, z: -breadthM / 2 }, normal: { x: 0, z: 1 } };
+    }
+
+    const opCenterMm = mainEntrance.distanceMm + mainEntrance.widthMm / 2;
+    if (mainEntrance.wall === 'NORTH') {
+      return {
+        pos: { x: (opCenterMm - lengthMm / 2) / 1000, y: 1.2, z: -breadthM / 2 },
+        normal: { x: 0, z: 1 }, // points inside store (+Z)
+      };
+    } else if (mainEntrance.wall === 'SOUTH') {
+      return {
+        pos: { x: (opCenterMm - lengthMm / 2) / 1000, y: 1.2, z: breadthM / 2 },
+        normal: { x: 0, z: -1 }, // points inside store (-Z)
+      };
+    } else if (mainEntrance.wall === 'WEST') {
+      return {
+        pos: { x: -lengthM / 2, y: 1.2, z: (opCenterMm - breadthMm / 2) / 1000 },
+        normal: { x: 1, z: 0 }, // points inside store (+X)
+      };
+    } else {
+      return {
+        pos: { x: lengthM / 2, y: 1.2, z: (opCenterMm - breadthMm / 2) / 1000 },
+        normal: { x: -1, z: 0 }, // points inside store (-X)
+      };
+    }
+  };
 
   // Handle camera presets
   const handleSetPreset = (preset: 'ISO' | 'WALKTHROUGH' | 'TOP' | 'FRONT') => {
@@ -573,23 +1165,42 @@ export const ShopFloor3DCanvas: React.FC<ShopFloor3DCanvasProps> = ({
     controls.autoRotate = false;
     setAutoRotate(false);
 
+    const { pos: entPos, normal: entNorm } = getMainEntranceCoords();
+
     switch (preset) {
       case 'ISO':
-        camera.position.set(lengthM * 0.85, Math.max(lengthM, breadthM) * 0.9, breadthM * 1.15);
-        controls.target.set(0, 0.8, 0);
+        camera.position.set(lengthM * 0.85, Math.max(lengthM, breadthM) * 0.95, breadthM * 1.15);
+        controls.target.set(0, 0.7, 0);
         break;
       case 'WALKTHROUGH':
-        // Eye-level walkthrough near entrance looking into main aisle
-        camera.position.set(0, 1.65, breadthM * 0.42);
-        controls.target.set(0, 1.4, -breadthM * 0.2);
+        // Eye-level (1.65m) just inside the entrance doorway looking down the shop
+        camera.position.set(
+          entPos.x + entNorm.x * 0.5,
+          1.65,
+          entPos.z + entNorm.z * 0.5
+        );
+        controls.target.set(
+          entPos.x + entNorm.x * 3.5,
+          1.4,
+          entPos.z + entNorm.z * 3.5
+        );
         break;
       case 'TOP':
         camera.position.set(0, Math.max(lengthM, breadthM) * 1.5, 0.01);
         controls.target.set(0, 0, 0);
         break;
       case 'FRONT':
-        camera.position.set(0, 2.0, breadthM * 0.95);
-        controls.target.set(0, 1.2, 0);
+        // Storefront entrance view looking in through the doorway
+        camera.position.set(
+          entPos.x - entNorm.x * 2.8,
+          1.85,
+          entPos.z - entNorm.z * 2.8
+        );
+        controls.target.set(
+          entPos.x + entNorm.x * 1.2,
+          1.1,
+          entPos.z + entNorm.z * 1.2
+        );
         break;
     }
     controls.update();
@@ -671,7 +1282,7 @@ export const ShopFloor3DCanvas: React.FC<ShopFloor3DCanvasProps> = ({
                 : 'text-slate-300 hover:text-white hover:bg-slate-800'
             }`}
           >
-            <Box className="w-3.5 h-3.5" />
+            <DoorOpen className="w-3.5 h-3.5" />
             <span>Entrance</span>
           </button>
         </div>
