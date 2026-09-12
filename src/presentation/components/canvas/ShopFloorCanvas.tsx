@@ -6,6 +6,7 @@ import { ShopSpecification } from '@/domain/entities/Shop';
 import { PlacementValidator, ValidationResult } from '@/domain/services/PlacementValidator';
 import { ArrangeToolbar } from './ArrangeToolbar';
 import { AddRackModal } from './AddRackModal';
+import { ShopFloor3DCanvas } from './ShopFloor3DCanvas';
 import {
   ZoomIn,
   ZoomOut,
@@ -30,6 +31,7 @@ export interface ShopFloorCanvasProps {
   isSaving?: boolean;
   isRepricing?: boolean;
   isDirty?: boolean;
+  initialViewMode?: '2D' | '3D';
 }
 
 export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
@@ -45,7 +47,9 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
   isSaving = false,
   isRepricing = false,
   isDirty = false,
+  initialViewMode = '2D',
 }) => {
+  const [viewMode, setViewMode] = useState<'2D' | '3D'>(initialViewMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.08); // mm to canvas pixels
   const [pan, setPan] = useState({ x: 50, y: 50 });
@@ -468,10 +472,24 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
         isSaving={isSaving}
         isRepricing={isRepricing}
         isDirty={isDirty}
+        viewMode={viewMode}
+        onToggleViewMode={setViewMode}
       />
 
-      {/* Canvas Top Bar Controls */}
-      <div className="absolute top-16 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
+      {viewMode === '3D' ? (
+        <div className="w-full flex-1 relative overflow-hidden min-h-[440px]">
+          <ShopFloor3DCanvas
+            shop={shop}
+            racks={racks}
+            selectedRackIndex={selectedRackIndex}
+            onSelectRack={handleSelectRack}
+            aisleWidthMm={aisleWidthMm}
+          />
+        </div>
+      ) : (
+        <>
+          {/* Canvas Top Bar Controls */}
+          <div className="absolute top-16 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
         {/* Left: View Controls */}
         <div className="flex items-center space-x-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700 pointer-events-auto shadow-md">
           <button
@@ -985,6 +1003,8 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
           </span>
         </div>
       </div>
+      </>
+      )}
 
       {/* Selected Rack Inspector Drawer */}
       {selectedRack && (

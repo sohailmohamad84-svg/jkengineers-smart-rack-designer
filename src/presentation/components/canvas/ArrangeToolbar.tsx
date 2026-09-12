@@ -13,6 +13,8 @@ import {
   RefreshCw,
   AlertCircle,
   Eye,
+  Box,
+  Compass,
 } from 'lucide-react';
 
 interface ArrangeToolbarProps {
@@ -28,6 +30,8 @@ interface ArrangeToolbarProps {
   isSaving?: boolean;
   isRepricing?: boolean;
   isDirty?: boolean;
+  viewMode?: '2D' | '3D';
+  onToggleViewMode?: (mode: '2D' | '3D') => void;
 }
 
 export const ArrangeToolbar: React.FC<ArrangeToolbarProps> = ({
@@ -43,23 +47,59 @@ export const ArrangeToolbar: React.FC<ArrangeToolbarProps> = ({
   isSaving = false,
   isRepricing = false,
   isDirty = false,
+  viewMode = '2D',
+  onToggleViewMode,
 }) => {
   return (
     <div className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-md">
-      {/* Left: Mode Toggle & Grid Control */}
+      {/* Left: 2D/3D Mode Switch & Mode Toggle & Grid Control */}
       <div className="flex items-center flex-wrap gap-2.5">
-        <button
-          type="button"
-          onClick={onToggleArrangeMode}
-          className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all shadow-sm ${
-            isArrangeMode
-              ? 'bg-brand-600 hover:bg-brand-500 text-white ring-2 ring-brand-400/50'
-              : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-          }`}
-        >
-          {isArrangeMode ? <Move className="w-3.5 h-3.5 animate-pulse text-amber-300" /> : <Eye className="w-3.5 h-3.5" />}
-          <span>{isArrangeMode ? 'Arrange Mode Active' : 'Arrange Racks'}</span>
-        </button>
+        {/* 2D / 3D View Switcher */}
+        <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 shadow-inner">
+          <button
+            type="button"
+            onClick={() => onToggleViewMode?.('2D')}
+            title="Switch to 2D Floor Plan CAD Layout"
+            className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+              viewMode === '2D'
+                ? 'bg-slate-800 text-white shadow-sm border border-slate-700'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Compass className="w-3.5 h-3.5 text-brand-400" />
+            <span>2D Plan</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleViewMode?.('3D')}
+            title="Switch to Interactive 3D Photorealistic Store View"
+            className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+              viewMode === '3D'
+                ? 'bg-brand-600 text-white shadow-md ring-1 ring-brand-400/50'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Box className="w-3.5 h-3.5 text-amber-300" />
+            <span>3D View</span>
+          </button>
+        </div>
+
+        <div className="h-5 w-px bg-slate-800 hidden sm:block" />
+
+        {viewMode === '2D' && (
+          <button
+            type="button"
+            onClick={onToggleArrangeMode}
+            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all shadow-sm ${
+              isArrangeMode
+                ? 'bg-brand-600 hover:bg-brand-500 text-white ring-2 ring-brand-400/50'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+            }`}
+          >
+            {isArrangeMode ? <Move className="w-3.5 h-3.5 animate-pulse text-amber-300" /> : <Eye className="w-3.5 h-3.5" />}
+            <span>{isArrangeMode ? 'Arrange Mode Active' : 'Arrange Racks'}</span>
+          </button>
+        )}
 
         {isArrangeMode && (
           <div className="flex items-center space-x-1.5 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800 text-xs">
