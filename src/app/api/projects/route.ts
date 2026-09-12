@@ -7,16 +7,22 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
 
   try {
-    const customer = await prisma.customer.findUnique({
+    let customer = await prisma.customer.findUnique({
       where: { userId: session!.userId },
     });
 
-    if (!customer) {
+    if (!customer && session!.role === 'ADMIN') {
+      customer = await prisma.customer.findFirst({
+        where: { userId: session!.userId },
+      });
+    }
+
+    if (!customer && session!.role !== 'ADMIN') {
       return NextResponse.json({ success: false, message: 'Customer profile not found.' }, { status: 404 });
     }
 
     const projects = await prisma.project.findMany({
-      where: { customerId: customer.id },
+      where: customer ? { customerId: customer.id } : {},
       orderBy: { updatedAt: 'desc' },
       include: {
         storeType: true,

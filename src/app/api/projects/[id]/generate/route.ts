@@ -9,12 +9,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   try {
     const body = await req.json();
-    const customer = await prisma.customer.findUnique({
+    let customer = await prisma.customer.findUnique({
       where: { userId: session!.userId },
     });
 
+    // If an admin user is using the designer, auto-provision their customer profile
+    if (!customer && session!.role === 'ADMIN') {
+      customer = await prisma.customer.findFirst({
+        where: { userId: session!.userId },
+      });
+      if (!customer) {
+        customer = await prisma.customer.create({
+          data: {
+            userId: session!.userId,
+            fullName: session!.fullName || 'JK Administrator',
+            businessName: 'JK Engineers Works Demo Store',
+            city: 'Mumbai',
+            shopLocation: 'Unit 12, Industrial Estate, Kanjurmarg West, Mumbai',
+          },
+        });
+      }
+    }
+
     if (!customer) {
-      return NextResponse.json({ success: false, message: 'Customer profile required.' }, { status: 403 });
+      return NextResponse.json({ success: false, message: 'Customer profile required. Please complete verification step.' }, { status: 403 });
     }
 
     const projectId = params.id === 'new' ? undefined : params.id;

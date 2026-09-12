@@ -23,8 +23,16 @@ async function main() {
           permissions: JSON.stringify(['ALL', 'PRICING_ADMIN', 'CATALOG_ADMIN', 'CRM_ADMIN']),
         },
       },
+      customer: {
+        create: {
+          fullName: 'JK Administrator',
+          businessName: 'JK Engineers Works Demo Facility',
+          city: 'Mumbai',
+          shopLocation: 'Unit 12, Industrial Estate, Kanjurmarg West, Mumbai',
+        },
+      },
     },
-    include: { admin: true },
+    include: { admin: true, customer: true },
   });
   console.log('Admin user seeded:', adminUser.email);
 

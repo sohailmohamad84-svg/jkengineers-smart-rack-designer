@@ -458,11 +458,15 @@ export default function DesignerPage() {
     }
 
     if (currentStep === 6) {
-      // If customer is already authenticated, directly generate design!
-      if (customerSession) {
+      // If user has an active customer profile OR is an admin, directly generate design!
+      const canDirectlyGenerate = Boolean(customerSession?.customer?.id || customerSession?.role === 'ADMIN');
+      if (canDirectlyGenerate) {
         triggerLayoutGeneration();
         return;
       }
+      // Otherwise proceed to Step 7 (Customer Info & OTP verification)
+      setCurrentStep(7);
+      return;
     }
 
     setCurrentStep((prev) => prev + 1);
@@ -1546,9 +1550,16 @@ export default function DesignerPage() {
 
             <button
               onClick={handleNext}
-              className="inline-flex items-center px-6 py-2.5 text-xs font-bold rounded-lg text-white bg-brand-500 hover:bg-brand-600 shadow-sm transition-all"
+              disabled={loading}
+              className="inline-flex items-center px-6 py-2.5 text-xs font-bold rounded-lg text-white bg-brand-500 hover:bg-brand-600 shadow-sm transition-all disabled:opacity-50"
             >
-              <span>{currentStep === 6 ? 'Proceed to Design' : 'Next Step'}</span>
+              <span>
+                {loading
+                  ? 'Generating Custom Layout...'
+                  : currentStep === 6
+                  ? (customerSession?.customer?.id || customerSession?.role === 'ADMIN' ? 'Proceed to Design' : 'Next: Verify Phone')
+                  : 'Next Step'}
+              </span>
               <ArrowRight className="w-4 h-4 ml-1.5" />
             </button>
           </div>
