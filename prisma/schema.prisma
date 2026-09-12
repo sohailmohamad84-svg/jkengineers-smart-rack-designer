@@ -1,0 +1,435 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -------------------------------------------------------------
+// USER & AUTHENTICATION
+// -------------------------------------------------------------
+model User {
+  id           String    @id @default(cuid())
+  role         String    @default("CUSTOMER") // CUSTOMER | ADMIN | DESIGNER | SALES
+  mobile       String?   @unique
+  email        String?   @unique
+  passwordHash String?   // Required for Admin; null for OTP-only Customer
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  customer     Customer?
+  admin        Admin?
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model Customer {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  fullName       String
+  whatsappNumber String?
+  city           String
+  shopLocation   String
+  businessName   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects       Project[]
+  customerNotes  CustomerNote[]
+  quotations     Quotation[]
+
+  @@map("customers")
+}
+
+model Admin {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  username       String    @unique
+  department     String    @default("Management")
+  permissions    String    @default("[\"ALL\"]") // JSON array of privileges
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerNotes  CustomerNote[]
+
+  @@map("admins")
+}
+
+model OtpVerification {
+  id          String    @id @default(cuid())
+  mobile      String
+  otpHash     String
+  attempts    Int       @default(0)
+  expiresAt   DateTime
+  verified    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@index([mobile])
+  @@map("otp_verifications")
+}
+
+// -------------------------------------------------------------
+// STORE CONFIGURATION & REQUIREMENTS
+// -------------------------------------------------------------
+model StoreType {
+  id                   String             @id @default(cuid())
+  code                 String             @unique
+  name                 String
+  description          String
+  minAisleWidthMm      Float              @default(1000)
+  defaultRackHeightMm  Float              @default(2100)
+  recommendedRacks     String             @default("[]") // JSON string of rack codes
+  icon                 String             @default("Store")
+  displayOrder         Int                @default(0)
+  active               Boolean            @default(true)
+  createdAt            DateTime           @default(now())
+
+  projects             Project[]
+  storeRequirements    StoreRequirement[]
+
+  @@map("store_types")
+}
+
+model StoreRequirement {
+  id              String    @id @default(cuid())
+  storeTypeId     String
+  code            String
+  label           String
+  requirementType String    @default("BOOLEAN") // BOOLEAN | SELECT | NUMBER
+  defaultValue    String    @default("true")
+  isRequired      Boolean   @default(false)
+
+  storeType       StoreType @relation(fields: [storeTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeTypeId, code])
+  @@map("store_requirements")
+}
+
+// -------------------------------------------------------------
+// PROJECTS & SHOP GEOMETRY
+// -------------------------------------------------------------
+model Project {
+  id            String    @id @default(cuid())
+  projectCode   String    @unique // e.g. JK-2026-000101
+  customerId    String
+  storeTypeId   String
+  status        String    @default("DRAFT") // DRAFT | DESIGNED | ESTIMATED | QUOTED
+  leadStatus    String    @default("NEW") // NEW | CONTACTED | SITE_VISIT_REQUIRED | DESIGN_PREPARED | QUOTATION_SENT | NEGOTIATION | CONFIRMED | PRODUCTION | INSTALLATION | COMPLETED | LOST
+  budget        Float     @default(200000)
+  siteVerified  Boolean   @default(false)
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  storeType     StoreType @relation(fields: [storeTypeId], references: [id])
+  shop          Shop?
+  designs       Design[]
+  quotations    Quotation[]
+
+  @@map("projects")
+}
+
+model Shop {
+  id          String         @id @default(cuid())
+  projectId   String         @unique
+  shape       String         @default("RECTANGLE") // RECTANGLE | SQUARE | L_SHAPED | CUSTOM
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dimensions  ShopDimensions?
+  openings    ShopOpening[]
+  obstacles   ShopObstacle[]
+
+  @@map("shops")
+}
+
+model ShopDimensions {
+  id                 String    @id @default(cuid())
+  shopId             String    @unique
+  lengthMm           Float
+  breadthMm          Float
+  heightMm           Float
+  displayUnit        String    @default("FEET") // FEET | INCHES | METERS | MM
+  verifiedByAdmin    Boolean   @default(false)
+  verifiedLengthMm   Float?
+  verifiedBreadthMm  Float?
+  verifiedHeightMm   Float?
+  verifiedAt         DateTime?
+
+  shop               Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("shop_dimensions")
+}
+
+model ShopOpening {
+  id             String    @id @default(cuid())
+  shopId         String
+  type           String    // DOOR_MAIN | DOOR_EXIT | DOOR_ADDITIONAL | WINDOW
+  wall           String    // NORTH | SOUTH | EAST | WEST
+  distanceMm     Float     // Distance from wall's reference start corner
+  widthMm        Float
+  heightMm       Float
+  swingDirection String    @default("INSIDE") // INSIDE | OUTSIDE | NONE
+
+  shop           Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("shop_openings")
+}
+
+model ShopObstacle {
+  id          String    @id @default(cuid())
+  shopId      String
+  type        String    // PILLAR | COLUMN | ELECTRICAL_PANEL | STAIRCASE | COUNTER | BEAM | REFRIGERATOR | OTHER
+  posX        Float     // Offset X in mm from shop origin (0,0)
+  posY        Float     // Offset Y in mm from shop origin (0,0)
+  widthMm     Float
+  depthMm     Float
+  heightMm    Float
+  wall        String?   // If wall mounted: NORTH | SOUTH | EAST | WEST | NONE
+
+  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("shop_obstacles")
+}
+
+// -------------------------------------------------------------
+// RACK CATALOGUE & SPECIFICATIONS
+// -------------------------------------------------------------
+model RackType {
+  id                   String        @id @default(cuid())
+  code                 String        @unique // e.g. WALL_RACK_900, GONDOLA_1200
+  name                 String
+  category             String        // WALL_RACK | GONDOLA_RACK | END_RACK | MEDICAL_RACK | GARMENT_RACK | CHECKOUT_COUNTER | HEAVY_DUTY | BIN_RACK
+  defaultWidthMm       Float
+  defaultHeightMm      Float
+  defaultDepthMm       Float
+  defaultShelves       Int           @default(5)
+  finish               String        @default("POWDER_COATED")
+  loadCapacityKg       Float         @default(70) // Load capacity per tier in kg
+  isDoubleSided        Boolean       @default(false)
+  baseShelfDepthMm     Float         @default(450)
+  baseCost             Float         @default(4500)
+  active               Boolean       @default(true)
+  imageMain            String?
+  imageGallery         String        @default("[]") // JSON string array
+  technicalDrawing     String?
+  compatibleStoreTypes String        @default("[\"ALL\"]") // JSON array of store codes
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  designRacks          DesignRack[]
+
+  @@map("rack_types")
+}
+
+// -------------------------------------------------------------
+// RAW MATERIALS & PRICE VERSIONING
+// -------------------------------------------------------------
+model Material {
+  id                   String                @id @default(cuid())
+  code                 String                @unique // e.g. MS_SHEET, POWDER_COAT, LABOUR
+  name                 String
+  category             String                // STEEL | FINISH | HARDWARE | LABOUR | LOGISTICS
+  unit                 String                // KG | SQ_FT | SQ_M | PIECE | RUNNING_FT | JOB
+  active               Boolean               @default(true)
+  notes                String?
+  createdAt            DateTime              @default(now())
+
+  currentPrice         MaterialPrice?
+  priceHistory         MaterialPriceHistory[]
+
+  @@map("materials")
+}
+
+model MaterialPrice {
+  id            String    @id @default(cuid())
+  materialId    String    @unique
+  currentRate   Float     // In INR (₹)
+  effectiveDate DateTime  @default(now())
+
+  material      Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@map("material_prices")
+}
+
+model MaterialPriceHistory {
+  id              String    @id @default(cuid())
+  materialId      String
+  previousRate    Float
+  newRate         Float
+  effectiveDate   DateTime  @default(now())
+  changedByAdminId String?
+  changeReason    String?
+  createdAt       DateTime  @default(now())
+
+  material        Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@map("material_price_history")
+}
+
+// -------------------------------------------------------------
+// DESIGNS, VERSIONS & SPATIAL LAYOUTS
+// -------------------------------------------------------------
+model Design {
+  id              String          @id @default(cuid())
+  projectId       String
+  designCode      String          @unique // e.g. D-JK-00101
+  activeVersionId String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions        DesignVersion[]
+
+  @@map("designs")
+}
+
+model DesignVersion {
+  id                  String       @id @default(cuid())
+  designId            String
+  versionNumber       Int          @default(1)
+  optionType          String       // OPTION_A_MAX_DISPLAY | OPTION_B_BALANCED | OPTION_C_BUDGET_OPTIMIZED
+  totalRacks          Int          @default(0)
+  totalDisplayAreaSqM Float        @default(0)
+  aisleWidthMm        Float        @default(1000)
+  floorAreaSqM        Float        @default(0)
+  explanation         String
+  createdAt           DateTime     @default(now())
+
+  design              Design       @relation(fields: [designId], references: [id], onDelete: Cascade)
+  racks               DesignRack[]
+  estimate            Estimate?
+
+  @@map("design_versions")
+}
+
+model DesignRack {
+  id              String        @id @default(cuid())
+  designVersionId String
+  rackTypeId      String
+  label           String        @default("Rack")
+  posX            Float         // Placement X in mm
+  posY            Float         // Placement Y in mm
+  rotation        Float         @default(0) // Degrees (0, 90, 180, 270)
+  widthMm         Float
+  depthMm         Float
+  heightMm        Float
+  shelvesCount    Int           @default(5)
+  wallPlacement   String?       // NORTH | SOUTH | EAST | WEST | ISLAND | CASHIER
+
+  designVersion   DesignVersion @relation(fields: [designVersionId], references: [id], onDelete: Cascade)
+  rackType        RackType      @relation(fields: [rackTypeId], references: [id])
+
+  @@map("design_racks")
+}
+
+// -------------------------------------------------------------
+// ESTIMATES & QUOTATIONS
+// -------------------------------------------------------------
+model Estimate {
+  id                     String         @id @default(cuid())
+  designVersionId        String         @unique
+  totalMaterialCost      Float
+  totalFabricationCost   Float
+  totalPowderCoatingCost Float
+  totalLaborCost         Float
+  totalInstallationCost  Float
+  totalTransportationCost Float
+  totalGstCost           Float
+  grandTotal             Float
+  minRange               Float
+  maxRange               Float
+  isIndicative           Boolean        @default(true)
+  createdAt              DateTime       @default(now())
+
+  designVersion          DesignVersion  @relation(fields: [designVersionId], references: [id], onDelete: Cascade)
+  items                  EstimateItem[]
+  quotation              Quotation?
+
+  @@map("estimates")
+}
+
+model EstimateItem {
+  id          String   @id @default(cuid())
+  estimateId  String
+  itemType    String   // MATERIAL | FABRICATION | FINISH | HARDWARE | LABOR | INSTALLATION | LOGISTICS | TAX
+  description String
+  quantity    Float
+  unit        String
+  unitRate    Float
+  totalAmount Float
+
+  estimate    Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@map("estimate_items")
+}
+
+model Quotation {
+  id              String    @id @default(cuid())
+  quotationNumber String    @unique // e.g. Q-JK-2026-0042
+  customerId      String
+  projectId       String
+  estimateId      String    @unique
+  status          String    @default("DRAFT") // DRAFT | ISSUED | ACCEPTED | EXPIRED
+  termsConditions String
+  validityDays    Int       @default(15)
+  pdfUrl          String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+
+  customer        Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  estimate        Estimate  @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@map("quotations")
+}
+
+// -------------------------------------------------------------
+// CRM, AUDIT & SYSTEM SETTINGS
+// -------------------------------------------------------------
+model CustomerNote {
+  id         String   @id @default(cuid())
+  customerId String
+  adminId    String
+  noteText   String
+  createdAt  DateTime @default(now())
+
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  admin      Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@map("customer_notes")
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actorId       String
+  actorRole     String   // ADMIN | SYSTEM | CUSTOMER
+  action        String   // MATERIAL_PRICE_UPDATE | RACK_CATALOG_UPDATE | LEAD_STATUS_CHANGE | SITE_VERIFICATION
+  entityType    String   // Material | RackType | Project | Estimate
+  entityId      String
+  previousValue String?  // JSON snapshot
+  newValue      String?  // JSON snapshot
+  timestamp     DateTime @default(now())
+
+  actor         User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id           String   @id @default(cuid())
+  settingKey   String   @unique
+  settingValue String   // JSON or scalar value
+  description  String
+  updatedAt    DateTime @updatedAt
+
+  @@map("system_settings")
+}
