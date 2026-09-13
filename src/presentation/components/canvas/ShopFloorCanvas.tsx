@@ -488,103 +488,109 @@ export const ShopFloorCanvas: React.FC<ShopFloorCanvasProps> = ({
         </div>
       ) : (
         <>
-          {/* Canvas Top Bar Controls */}
-          <div className="absolute top-16 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
-        {/* Left: View Controls */}
-        <div className="flex items-center space-x-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700 pointer-events-auto shadow-md">
-          <button
-            onClick={() => handleZoom(0.02)}
-            title="Zoom In"
-            className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
-          >
-            <ZoomIn className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => handleZoom(-0.02)}
-            title="Zoom Out"
-            className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
-          >
-            <ZoomOut className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleResetZoom}
-            title="Fit to Screen"
-            className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
-          >
-            <Maximize2 className="w-4 h-4" />
-          </button>
-          <div className="h-4 w-px bg-slate-700 mx-1" />
-          <span className="text-[11px] font-mono font-medium text-slate-400 px-1">
-            {Math.round(scale * 1000)}%
-          </span>
-        </div>
-
-        {/* Right: Feature Toggles */}
-        <div className="flex items-center space-x-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700 pointer-events-auto shadow-md">
-          <button
-            onClick={() => setShowDimensions(!showDimensions)}
-            title="Toggle Dimension Annotations"
-            className={`px-2 py-1 text-xs font-semibold rounded flex items-center space-x-1 transition-colors ${
-              showDimensions
-                ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
-                : 'text-slate-400 hover:text-white'
+          {/* SVG Canvas Area */}
+          <div
+            ref={containerRef}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleMouseUp}
+            className={`w-full flex-1 relative overflow-hidden min-h-[420px] ${
+              draggingRackIndex !== null
+                ? 'cursor-grabbing'
+                : isArrangeMode
+                ? 'cursor-default'
+                : 'cursor-grab active:cursor-grabbing'
             }`}
           >
-            <span>Dimensions</span>
-          </button>
-          <button
-            onClick={() => setShowLabels(!showLabels)}
-            title="Toggle Fixture Labels"
-            className={`px-2 py-1 text-xs font-semibold rounded flex items-center space-x-1 transition-colors ${
-              showLabels
-                ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Tag className="w-3 h-3 mr-1" />
-            <span>Labels</span>
-          </button>
-          <button
-            onClick={() => setShowAisles(!showAisles)}
-            title="Toggle Aisle Walking Corridors"
-            className={`px-2 py-1 text-xs font-semibold rounded flex items-center space-x-1 transition-colors ${
-              showAisles
-                ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <span>Aisles</span>
-          </button>
-        </div>
-      </div>
+            {/* Canvas Floating Top Controls: Zoom & Feature Toggles */}
+            <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
+              {/* Left: View Controls */}
+              <div className="flex items-center space-x-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700 pointer-events-auto shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => handleZoom(0.02)}
+                  title="Zoom In"
+                  className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleZoom(-0.02)}
+                  title="Zoom Out"
+                  className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetZoom}
+                  title="Fit to Screen"
+                  className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                >
+                  <Maximize2 className="w-4 h-4" />
+                </button>
+                <div className="h-4 w-px bg-slate-700 mx-1" />
+                <span className="text-[11px] font-mono font-medium text-slate-400 px-1">
+                  {Math.round(scale * 1000)}%
+                </span>
+              </div>
 
-      {/* Floating Toast Notification */}
-      {toastMessage && (
-        <div className="absolute top-28 left-1/2 -translate-x-1/2 z-40 bg-red-900/90 backdrop-blur-md border border-red-700 text-red-100 text-xs px-4 py-2 rounded-lg shadow-xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-2">
-          <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
+              {/* Right: Feature Toggles */}
+              <div className="flex items-center space-x-1.5 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-lg border border-slate-700 pointer-events-auto shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => setShowDimensions(!showDimensions)}
+                  title="Toggle Dimension Annotations"
+                  className={`px-2.5 py-1 text-xs font-semibold rounded flex items-center space-x-1 transition-colors ${
+                    showDimensions
+                      ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>Dimensions</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowLabels(!showLabels)}
+                  title="Toggle Fixture Labels"
+                  className={`px-2.5 py-1 text-xs font-semibold rounded flex items-center space-x-1 transition-colors ${
+                    showLabels
+                      ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Tag className="w-3 h-3 mr-1" />
+                  <span>Labels</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAisles(!showAisles)}
+                  title="Toggle Aisle Walking Corridors"
+                  className={`px-2.5 py-1 text-xs font-semibold rounded flex items-center space-x-1 transition-colors ${
+                    showAisles
+                      ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>Aisles</span>
+                </button>
+              </div>
+            </div>
 
-      {/* SVG Canvas Area */}
-      <div
-        ref={containerRef}
-        onMouseDown={handleCanvasMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleMouseUp}
-        className={`w-full flex-1 relative overflow-hidden min-h-[420px] ${
-          draggingRackIndex !== null
-            ? 'cursor-grabbing'
-            : isArrangeMode
-            ? 'cursor-default'
-            : 'cursor-grab active:cursor-grabbing'
-        }`}
-      >
-        <svg className="absolute inset-0 w-full h-full block">
+            {/* Floating Toast Notification */}
+            {toastMessage && (
+              <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 bg-red-900/90 backdrop-blur-md border border-red-700 text-red-100 text-xs px-4 py-2 rounded-lg shadow-xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-2">
+                <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>{toastMessage}</span>
+              </div>
+            )}
+
+            <svg className="absolute inset-0 w-full h-full block">
           {/* Pattern Definitions */}
           <defs>
             <pattern
