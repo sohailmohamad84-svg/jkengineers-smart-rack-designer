@@ -68,7 +68,7 @@ export default function HomePage() {
       dimensions: '900 / 1200 mm W × 450 mm D × 2100 mm H',
       load: '70–80 kg per shelf tier',
       finish: 'Pure Epoxy Polyester Powder Coated (7-Tank)',
-      img: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=800&auto=format&fit=crop&q=60',
+      img: '/images/wall-display-rack.jpg',
       description: 'Single-sided wall unit featuring adjustable cantilever brackets and heavy-gauge Tata/JSW prime steel.',
     },
     {
@@ -77,7 +77,7 @@ export default function HomePage() {
       dimensions: '900 / 1200 mm W × 900 mm D × 1500 mm H',
       load: '70–80 kg per shelf tier (10 tiers total)',
       finish: 'Epoxy Powder Coated with Leveling Studs',
-      img: 'https://images.unsplash.com/photo-1588854337221-4cf9fa96059c?w=800&auto=format&fit=crop&q=60',
+      img: '/images/center-gondola-rack.jpg',
       description: 'Double-sided island rack designed for customer walking aisles with maximum product visibility.',
     },
     {
@@ -86,7 +86,7 @@ export default function HomePage() {
       dimensions: '900 mm W × 450 mm D × 1500 mm H',
       load: '65 kg per shelf tier',
       finish: 'Anti-corrosive Powder Coating',
-      img: 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=800&auto=format&fit=crop&q=60',
+      img: '/images/gondola-end-rack.jpg',
       description: 'Promotional end-cap fixture for high-margin impulse goods, attaching seamlessly to gondola runs.',
     },
     {
@@ -95,7 +95,7 @@ export default function HomePage() {
       dimensions: '1500 mm W × 750 mm D × 900 mm H',
       load: '150 kg counter surface rating',
       finish: 'Stainless Steel Top & Powder Coated Body',
-      img: 'https://images.unsplash.com/photo-1556742049-0a67e557224f?w=800&auto=format&fit=crop&q=60',
+      img: '/images/retail-checkout-counter.jpg',
       description: 'Cashier billing desk with integrated cash drawer compartment, barcode scanner zone, and basket area.',
     },
   ];

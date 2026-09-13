@@ -278,7 +278,7 @@ async function main() {
       baseShelfDepthMm: 750,
       baseCost: 14500,
       finish: 'POWDER_COATED',
-      imageMain: 'https://images.unsplash.com/photo-1556742049-0a67e557224f?w=800&auto=format&fit=crop&q=60',
+      imageMain: '/images/retail-checkout-counter.jpg',
       compatibleStoreTypes: JSON.stringify(['ALL']),
     },
   ];
