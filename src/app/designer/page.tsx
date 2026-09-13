@@ -6,6 +6,7 @@ import { Navbar } from '@/presentation/components/navigation/Navbar';
 import { Footer } from '@/presentation/components/navigation/Footer';
 import { ShopFloorCanvas } from '@/presentation/components/canvas/ShopFloorCanvas';
 import { StoreLayoutResult, DesignOption } from '@/domain/entities/Design';
+import { CostEstimate } from '@/domain/entities/Estimate';
 import { ShopSpecification } from '@/domain/entities/Shop';
 import { PlacedRack } from '@/domain/entities/Rack';
 import {
@@ -206,21 +207,62 @@ export default function DesignerPage() {
       const data = await res.json();
       if (data.success && data.version) {
         setIsDirty(false);
+
+        // Dynamically compute racksByType from current active fixtures
+        const racksByType: Record<string, number> = {};
+        activeOpt.racks.forEach((r) => {
+          const name = r.rackTypeName || 'Modular Rack';
+          racksByType[name] = (racksByType[name] || 0) + 1;
+        });
+
+        // Ensure estimate is 100% complete with subTotal, GST, disclaimer, and items
+        const est = data.version.estimate || {};
+        const grandTotal = est.grandTotal ?? activeOpt.estimate?.grandTotal ?? 0;
+        const totalGstCost = est.totalGstCost ?? activeOpt.estimate?.totalGstCost ?? Math.round(grandTotal * 0.18 / 1.18);
+        const subTotal = est.subTotal ?? (grandTotal - totalGstCost);
+        const minRange = est.minRange ?? activeOpt.estimate?.minRange ?? Math.round(grandTotal * 0.95);
+        const maxRange = est.maxRange ?? activeOpt.estimate?.maxRange ?? Math.round(grandTotal * 1.05);
+
+        const safeEstimate: CostEstimate = {
+          ...activeOpt.estimate,
+          ...est,
+          subTotal,
+          totalGstCost,
+          grandTotal,
+          minRange,
+          maxRange,
+          disclaimer:
+            est.disclaimer ||
+            activeOpt.estimate?.disclaimer ||
+            'Authoritative deterministic estimate based on active raw material rates and statutory 18% GST.',
+          items: est.items || activeOpt.estimate?.items || [],
+          totalMaterialCost: est.totalMaterialCost ?? activeOpt.estimate?.totalMaterialCost ?? 0,
+          totalFabricationCost: est.totalFabricationCost ?? activeOpt.estimate?.totalFabricationCost ?? 0,
+          totalPowderCoatingCost: est.totalPowderCoatingCost ?? activeOpt.estimate?.totalPowderCoatingCost ?? 0,
+          totalLaborCost: est.totalLaborCost ?? activeOpt.estimate?.totalLaborCost ?? 0,
+          totalInstallationCost: est.totalInstallationCost ?? activeOpt.estimate?.totalInstallationCost ?? 0,
+          totalTransportationCost: est.totalTransportationCost ?? activeOpt.estimate?.totalTransportationCost ?? 0,
+          isIndicative: true,
+          createdAt: est.createdAt ? new Date(est.createdAt) : new Date(),
+        };
+
         const newOpt: DesignOption = {
+          id: data.version.id,
           versionNumber: data.version.versionNumber,
-          optionType: data.version.optionType,
+          optionType: 'OPTION_B_BALANCED',
           title: `Version ${data.version.versionNumber}: Custom Arrangement`,
           subtitle: 'Customer arranged floor plan',
-          totalRacks: data.version.totalRacks,
-          racksByType: activeOpt.racksByType,
-          totalDisplayAreaSqM: data.version.totalDisplayAreaSqM,
-          floorAreaSqM: data.version.floorAreaSqM,
-          aisleWidthMm: data.version.aisleWidthMm,
+          totalRacks: data.version.totalRacks || activeOpt.racks.length,
+          racksByType,
+          totalDisplayAreaSqM: data.version.totalDisplayAreaSqM || activeOpt.totalDisplayAreaSqM,
+          floorAreaSqM: data.version.floorAreaSqM || activeOpt.floorAreaSqM,
+          aisleWidthMm: data.version.aisleWidthMm || activeOpt.aisleWidthMm,
           racks: activeOpt.racks,
-          estimate: data.version.estimate,
-          explanation: data.version.explanation,
-          highlights: [`Custom arrangement preserved with ${data.version.totalRacks} fixtures`],
+          estimate: safeEstimate,
+          explanation: data.version.explanation || 'Custom customer arrangement preserved',
+          highlights: [`Custom arrangement preserved with ${activeOpt.racks.length} fixtures`],
         };
+
         const nextOpts = [...layoutResult.options, newOpt];
         setLayoutResult({ ...layoutResult, options: nextOpts });
         setActiveOptionIndex(nextOpts.length - 1);
@@ -1320,22 +1362,31 @@ export default function DesignerPage() {
               <div className="bg-slate-950 text-white p-4 rounded-xl shrink-0 text-right">
                 <span className="text-[10px] uppercase tracking-wider text-slate-400 block">Indicative Cost</span>
                 <div className="text-2xl font-black text-brand-400 tracking-tight">
-                  ₹{layoutResult.options[activeOptionIndex].estimate.grandTotal.toLocaleString('en-IN')}
+                  ₹{(layoutResult.options[activeOptionIndex]?.estimate?.grandTotal ?? 0).toLocaleString('en-IN')}
                 </div>
                 <span className="text-[11px] text-slate-400 block">
-                  Range: ₹{layoutResult.options[activeOptionIndex].estimate.minRange.toLocaleString('en-IN')} – ₹{layoutResult.options[activeOptionIndex].estimate.maxRange.toLocaleString('en-IN')}
+                  Range: ₹{(layoutResult.options[activeOptionIndex]?.estimate?.minRange ?? 0).toLocaleString('en-IN')} – ₹{(layoutResult.options[activeOptionIndex]?.estimate?.maxRange ?? 0).toLocaleString('en-IN')}
                 </span>
                 <span className="text-[10px] text-emerald-400 block mt-0.5">Includes 18% GST & Installation</span>
               </div>
             </div>
 
-            {/* Option Tabs (Option A, Option B, Option C) */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Option Tabs (Option A, Option B, Option C & Saved Versions) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {layoutResult.options.map((opt, idx) => {
                 const isSelected = activeOptionIndex === idx;
+                const tabLabel =
+                  opt.versionNumber > 3
+                    ? `Version ${opt.versionNumber}`
+                    : idx === 0
+                    ? 'Option A'
+                    : idx === 1
+                    ? 'Option B'
+                    : 'Option C';
+
                 return (
                   <div
-                    key={opt.optionType}
+                    key={opt.id || `${opt.versionNumber || idx}-${opt.title}`}
                     onClick={() => handleSelectOption(idx)}
                     className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
                       isSelected
@@ -1345,7 +1396,7 @@ export default function DesignerPage() {
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                        Option {idx === 0 ? 'A' : idx === 1 ? 'B' : 'C'}
+                        {tabLabel}
                       </span>
                       {isSelected && (
                         <span className="text-[10px] font-bold bg-brand-500 text-white px-2 py-0.5 rounded-full">
@@ -1353,7 +1404,9 @@ export default function DesignerPage() {
                         </span>
                       )}
                     </div>
-                    <h3 className="font-extrabold text-sm text-slate-900">{opt.title.split(':')[1] || opt.title}</h3>
+                    <h3 className="font-extrabold text-sm text-slate-900 truncate">
+                      {opt.title.includes(':') ? opt.title.split(':')[1].trim() : opt.title}
+                    </h3>
                     <div className="mt-2 text-xs text-slate-600 space-y-1">
                       <div className="flex justify-between">
                         <span>Total Fixtures:</span>
@@ -1366,7 +1419,7 @@ export default function DesignerPage() {
                       <div className="flex justify-between">
                         <span>Estimate:</span>
                         <strong className="text-brand-600 font-bold">
-                          ₹{opt.estimate.grandTotal.toLocaleString('en-IN')}
+                          ₹{(opt.estimate?.grandTotal ?? 0).toLocaleString('en-IN')}
                         </strong>
                       </div>
                     </div>
@@ -1422,7 +1475,7 @@ export default function DesignerPage() {
                   Fixture Quantity Breakdown
                 </h3>
                 <div className="divide-y divide-slate-100 text-xs">
-                  {Object.entries(layoutResult.options[activeOptionIndex].racksByType).map(([name, qty]) => (
+                  {Object.entries(layoutResult.options[activeOptionIndex]?.racksByType || {}).map(([name, qty]) => (
                     <div key={name} className="py-2.5 flex justify-between items-center">
                       <span className="text-slate-700 font-medium">{name}</span>
                       <span className="font-mono font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-900">
@@ -1450,7 +1503,7 @@ export default function DesignerPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {layoutResult.options[activeOptionIndex].estimate.items.map((item, idx) => (
+                      {(layoutResult.options[activeOptionIndex]?.estimate?.items || []).map((item, idx) => (
                         <tr key={idx} className="hover:bg-slate-50">
                           <td className="py-2 pr-2 text-slate-800 font-medium">{item.description}</td>
                           <td className="py-2 text-right text-slate-600 font-mono">
@@ -1460,7 +1513,7 @@ export default function DesignerPage() {
                             ₹{item.unitRate}
                           </td>
                           <td className="py-2 text-right font-bold text-slate-900 font-mono">
-                            ₹{item.totalAmount.toLocaleString('en-IN')}
+                            ₹{(item.totalAmount ?? 0).toLocaleString('en-IN')}
                           </td>
                         </tr>
                       ))}
@@ -1469,19 +1522,19 @@ export default function DesignerPage() {
                       <tr className="border-t-2 border-slate-200 font-bold">
                         <td colSpan={3} className="pt-2 text-right text-slate-600">Subtotal:</td>
                         <td className="pt-2 text-right font-mono">
-                          ₹{layoutResult.options[activeOptionIndex].estimate.subTotal.toLocaleString('en-IN')}
+                          ₹{(layoutResult.options[activeOptionIndex]?.estimate?.subTotal ?? 0).toLocaleString('en-IN')}
                         </td>
                       </tr>
                       <tr className="font-bold">
                         <td colSpan={3} className="text-right text-slate-600">GST @ 18%:</td>
                         <td className="text-right font-mono">
-                          ₹{layoutResult.options[activeOptionIndex].estimate.totalGstCost.toLocaleString('en-IN')}
+                          ₹{(layoutResult.options[activeOptionIndex]?.estimate?.totalGstCost ?? 0).toLocaleString('en-IN')}
                         </td>
                       </tr>
                       <tr className="border-t border-slate-200 font-black text-sm text-brand-600">
                         <td colSpan={3} className="pt-2 text-right">Estimated Total:</td>
                         <td className="pt-2 text-right font-mono">
-                          ₹{layoutResult.options[activeOptionIndex].estimate.grandTotal.toLocaleString('en-IN')}
+                          ₹{(layoutResult.options[activeOptionIndex]?.estimate?.grandTotal ?? 0).toLocaleString('en-IN')}
                         </td>
                       </tr>
                     </tfoot>
@@ -1489,7 +1542,7 @@ export default function DesignerPage() {
                 </div>
 
                 <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-500 italic">
-                  * {layoutResult.options[activeOptionIndex].estimate.disclaimer}
+                  * {layoutResult.options[activeOptionIndex]?.estimate?.disclaimer || 'Authoritative deterministic estimate based on active raw material rates and statutory 18% GST.'}
                 </div>
               </div>
             </div>

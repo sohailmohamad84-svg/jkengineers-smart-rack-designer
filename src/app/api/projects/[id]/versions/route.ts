@@ -178,10 +178,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       },
     });
 
+    const subTotal = estimate.subTotal ?? Math.round(estimate.grandTotal - (estimate.totalGstCost || 0));
+
+    const responseVersion = {
+      ...completeVersion,
+      estimate: completeVersion?.estimate
+        ? {
+            ...completeVersion.estimate,
+            subTotal,
+            disclaimer:
+              estimate.disclaimer ||
+              'This quotation is an authoritative engineering estimate based on client shop dimensions and active raw material rates.',
+            items: completeVersion.estimate.items || estimate.items || [],
+          }
+        : estimate,
+    };
+
     return NextResponse.json({
       success: true,
       message: `Successfully saved Layout Version ${nextVersionNumber}`,
-      version: completeVersion,
+      version: responseVersion,
     });
   } catch (error: any) {
     console.error('[API /api/projects/:id/versions] Error:', error);
