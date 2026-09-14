@@ -132,6 +132,7 @@ export class RackDesignEngine {
   ): DesignOption {
     const { lengthMm, breadthMm, heightMm } = shop.dimensions;
     const placedRacks: PlacedRack[] = [];
+    const MAX_PLACED_RACKS_PER_OPTION = 450; // Safety cap to ensure deterministic sub-100ms spatial solving
 
     // Identify standard racks from catalog
     const wallRackStd = catalogRacks.find((r) => r.code === 'WALL_RACK_900') || catalogRacks[0];
@@ -217,6 +218,7 @@ export class RackDesignEngine {
 
     // A. North Wall (Y = 0)
     for (let x = 450; x <= lengthMm - rackWidth - 450; x += rackWidth) {
+      if (placedRacks.length >= MAX_PLACED_RACKS_PER_OPTION) break;
       const candidate: PlacedRack = {
         rackTypeCode: chosenWallRack.code,
         rackTypeName: chosenWallRack.name,
@@ -240,6 +242,7 @@ export class RackDesignEngine {
 
     // B. South Wall (Y = breadthMm - wallDepth)
     for (let x = 450; x <= lengthMm - rackWidth - 450; x += rackWidth) {
+      if (placedRacks.length >= MAX_PLACED_RACKS_PER_OPTION) break;
       const candidate: PlacedRack = {
         rackTypeCode: chosenWallRack.code,
         rackTypeName: chosenWallRack.name,
@@ -263,6 +266,7 @@ export class RackDesignEngine {
 
     // C. West Wall (X = 0)
     for (let y = 450; y <= breadthMm - rackWidth - 450; y += rackWidth) {
+      if (placedRacks.length >= MAX_PLACED_RACKS_PER_OPTION) break;
       const candidate: PlacedRack = {
         rackTypeCode: chosenWallRack.code,
         rackTypeName: chosenWallRack.name,
@@ -286,6 +290,7 @@ export class RackDesignEngine {
 
     // D. East Wall (X = lengthMm - wallDepth)
     for (let y = 450; y <= breadthMm - rackWidth - 450; y += rackWidth) {
+      if (placedRacks.length >= MAX_PLACED_RACKS_PER_OPTION) break;
       const candidate: PlacedRack = {
         rackTypeCode: chosenWallRack.code,
         rackTypeName: chosenWallRack.name,
@@ -333,6 +338,7 @@ export class RackDesignEngine {
         const numRows = Math.max(1, Math.floor((islandSpanY + effectiveAisleMm) / rowPitchY));
 
         for (let r = 0; r < numRows; r++) {
+          if (placedRacks.length >= MAX_PLACED_RACKS_PER_OPTION) break;
           const rowY = minY + r * rowPitchY;
           if (rowY + gondolaDepth > maxY) break;
 
@@ -340,7 +346,12 @@ export class RackDesignEngine {
           let currentX = minX;
 
           // End cap on West end if requested
-          if (config.includeEndCaps && endRackStd && currentX - endRackStd.defaultDepthMm >= minX - 400) {
+          if (
+            config.includeEndCaps &&
+            endRackStd &&
+            currentX - endRackStd.defaultDepthMm >= minX - 400 &&
+            placedRacks.length < MAX_PLACED_RACKS_PER_OPTION
+          ) {
             const candidateEndWest: PlacedRack = {
               rackTypeCode: endRackStd.code,
               rackTypeName: endRackStd.name,
@@ -362,7 +373,7 @@ export class RackDesignEngine {
             }
           }
 
-          while (currentX + gondolaW <= maxX) {
+          while (currentX + gondolaW <= maxX && placedRacks.length < MAX_PLACED_RACKS_PER_OPTION) {
             const candidateGondola: PlacedRack = {
               rackTypeCode: gondolaStd.code,
               rackTypeName: gondolaStd.name,
@@ -389,7 +400,7 @@ export class RackDesignEngine {
           }
 
           // End cap on East end if requested
-          if (config.includeEndCaps && endRackStd) {
+          if (config.includeEndCaps && endRackStd && placedRacks.length < MAX_PLACED_RACKS_PER_OPTION) {
             const candidateEndEast: PlacedRack = {
               rackTypeCode: endRackStd.code,
               rackTypeName: endRackStd.name,

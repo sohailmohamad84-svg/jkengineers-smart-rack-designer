@@ -267,23 +267,27 @@ export class GenerateShopDesignUseCase {
           balancedVersionId = createdVersion.id;
         }
 
-        // Map PlacedRacks to database rows
-        for (const rack of opt.racks) {
+        // Map PlacedRacks to database rows (batch insert for maximum performance)
+        const racksData = opt.racks.map((rack) => {
           const matchedType = catalogRacks.find((r) => r.code === rack.rackTypeCode) || catalogRacks[0];
-          await prisma.designRack.create({
-            data: {
-              designVersionId: createdVersion.id,
-              rackTypeId: matchedType.id,
-              label: rack.label,
-              posX: rack.posX,
-              posY: rack.posY,
-              rotation: rack.rotation,
-              widthMm: rack.widthMm,
-              depthMm: rack.depthMm,
-              heightMm: rack.heightMm,
-              shelvesCount: rack.shelvesCount,
-              wallPlacement: rack.wallPlacement || null,
-            },
+          return {
+            designVersionId: createdVersion.id,
+            rackTypeId: matchedType.id,
+            label: rack.label,
+            posX: rack.posX,
+            posY: rack.posY,
+            rotation: rack.rotation,
+            widthMm: rack.widthMm,
+            depthMm: rack.depthMm,
+            heightMm: rack.heightMm,
+            shelvesCount: rack.shelvesCount,
+            wallPlacement: rack.wallPlacement || null,
+          };
+        });
+
+        if (racksData.length > 0) {
+          await prisma.designRack.createMany({
+            data: racksData,
           });
         }
       }

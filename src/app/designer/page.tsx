@@ -449,12 +449,20 @@ export default function DesignerPage() {
     setErrorMessage('');
 
     const currentShop = getShopSpec();
+    const effectiveCustomerId = customerId || customerSession?.customer?.id || customerSession?.id;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 25000); // 25s timeout safeguard
 
     try {
       const res = await fetch('/api/projects/new/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
+          customerId: effectiveCustomerId,
           storeTypeCode: selectedStoreType,
           budget,
           shape: currentShop.shape,
@@ -472,6 +480,8 @@ export default function DesignerPage() {
         }),
       });
 
+      clearTimeout(timeoutId);
+
       const data = await res.json();
 
       if (data.success && data.result) {
@@ -482,9 +492,14 @@ export default function DesignerPage() {
       } else {
         setErrorMessage(data.message || 'Layout generation failed. Please check measurements.');
       }
-    } catch {
-      setErrorMessage('Server error while generating layout.');
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        setErrorMessage('Layout generation timed out after 25 seconds. Please verify your shop dimensions or contact JK Engineers support.');
+      } else {
+        setErrorMessage(err?.message || 'Server error while generating layout.');
+      }
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
@@ -495,6 +510,27 @@ export default function DesignerPage() {
     if (currentStep === 2) {
       if (length <= 0 || breadth <= 0 || height <= 0) {
         setErrorMessage('All dimensions must be greater than zero.');
+        return;
+      }
+      const dims = getShopSpec().dimensions;
+      if (dims.lengthMm > 150000 || dims.breadthMm > 150000) {
+        const offending = dims.lengthMm > 150000 ? `Length (${(dims.lengthMm / 1000).toFixed(0)}m)` : `Breadth (${(dims.breadthMm / 1000).toFixed(0)}m)`;
+        setErrorMessage(
+          `Maximum supported retail dimension is 150 meters (approx 500 feet). ${offending} exceeds limit. Did you mean millimeters? For industrial warehouse shelving, contact JK Engineers.`
+        );
+        return;
+      }
+      if (dims.heightMm > 15000) {
+        setErrorMessage(
+          `Maximum clear height is 15 meters (approx 50 feet). Current: ${(dims.heightMm / 1000).toFixed(1)}m. Standard commercial ceiling height is typically 3m to 6m.`
+        );
+        return;
+      }
+      const areaSqM = (dims.lengthMm * dims.breadthMm) / 1000000;
+      if (areaSqM > 10000) {
+        setErrorMessage(
+          `Shop floor area (${Math.round(areaSqM).toLocaleString()} m²) exceeds the automated designer limit of 10,000 m² (~107,000 sq ft). For mega-distribution hubs, contact JK Engineers.`
+        );
         return;
       }
     }
@@ -791,6 +827,21 @@ export default function DesignerPage() {
                 </p>
               </div>
             </div>
+
+            {/* Dimension Warning Banner */}
+            {(getShopSpec().dimensions.lengthMm > 150000 ||
+              getShopSpec().dimensions.breadthMm > 150000 ||
+              getShopSpec().dimensions.heightMm > 15000 ||
+              (getShopSpec().dimensions.lengthMm * getShopSpec().dimensions.breadthMm) / 1000000 > 10000) && (
+              <div className="mt-6 p-4 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 flex items-start space-x-2.5 shadow-sm">
+                <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                <div>
+                  <strong className="font-semibold block mb-1">Dimension Limit Warning:</strong>
+                  The entered dimensions exceed the maximum automated commercial retail footprint (150m × 150m or 10,000 m²). 
+                  Did you mean <strong>Millimeters (MM)</strong> instead of Feet? If you are planning an industrial warehouse or logistics hub, please contact the JK Engineers engineering desk for a custom structural calculation.
+                </div>
+              </div>
+            )}
 
             <div className="mt-6 p-4 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-800 flex items-start space-x-2.5">
               <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />

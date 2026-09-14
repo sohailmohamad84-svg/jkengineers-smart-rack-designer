@@ -116,6 +116,12 @@ export class MeasurementService {
     throw new Error(`Unable to parse dimension string: "${input}"`);
   }
 
+  public static readonly MIN_DIMENSION_MM = 1000;
+  public static readonly MIN_HEIGHT_MM = 1800;
+  public static readonly MAX_DIMENSION_MM = 150000; // 150m (~500 ft)
+  public static readonly MAX_HEIGHT_MM = 15000; // 15m (~50 ft)
+  public static readonly MAX_AREA_SQM = 10000; // 10,000 sq m (~107,000 sq ft)
+
   /**
    * Validate entire shop geometry and openings constraints
    */
@@ -126,14 +132,28 @@ export class MeasurementService {
   ): { isValid: boolean; errors: string[] } {
     const errors: string[] = [];
 
-    if (dimensions.lengthMm <= 1000) {
+    if (dimensions.lengthMm <= this.MIN_DIMENSION_MM) {
       errors.push('Shop length must be at least 1000 mm (approx 3.3 ft).');
     }
-    if (dimensions.breadthMm <= 1000) {
+    if (dimensions.lengthMm > this.MAX_DIMENSION_MM) {
+      errors.push(`Shop length cannot exceed 150 meters (~500 ft). Current: ${(dimensions.lengthMm / 1000).toFixed(1)}m. Did you mean millimeters? For industrial warehouse shelving, contact JK Engineers.`);
+    }
+    if (dimensions.breadthMm <= this.MIN_DIMENSION_MM) {
       errors.push('Shop breadth must be at least 1000 mm (approx 3.3 ft).');
     }
-    if (dimensions.heightMm <= 1800) {
+    if (dimensions.breadthMm > this.MAX_DIMENSION_MM) {
+      errors.push(`Shop breadth cannot exceed 150 meters (~500 ft). Current: ${(dimensions.breadthMm / 1000).toFixed(1)}m. Did you mean millimeters? For industrial warehouse shelving, contact JK Engineers.`);
+    }
+    if (dimensions.heightMm <= this.MIN_HEIGHT_MM) {
       errors.push('Shop height must be at least 1800 mm (approx 6 ft) to accommodate standard racks.');
+    }
+    if (dimensions.heightMm > this.MAX_HEIGHT_MM) {
+      errors.push(`Shop height cannot exceed 15 meters (~50 ft). Current: ${(dimensions.heightMm / 1000).toFixed(1)}m.`);
+    }
+
+    const areaSqM = (dimensions.lengthMm * dimensions.breadthMm) / 1000000;
+    if (areaSqM > this.MAX_AREA_SQM) {
+      errors.push(`Total shop floor area (${Math.round(areaSqM).toLocaleString()} m²) exceeds the automated designer limit of 10,000 m². For industrial distribution centers, contact JK Engineers.`);
     }
 
     for (const [index, op] of openings.entries()) {

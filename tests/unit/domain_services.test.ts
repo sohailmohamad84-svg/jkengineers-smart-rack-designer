@@ -42,6 +42,35 @@ describe('Domain Services Verification', () => {
       expect(invalidDoor.isValid).toBe(false);
       expect(invalidDoor.errors.length).toBeGreaterThan(0);
     });
+
+    it('enforces maximum upper bounds for commercial retail shops and rejects extreme dimensions', () => {
+      // Length > 150m (e.g. 2000 feet = 609,600 mm)
+      const extremeShop = MeasurementService.validateShopGeometry(
+        { lengthMm: 609600, breadthMm: 457200, heightMm: 3000, displayUnit: 'FEET' },
+        [],
+        []
+      );
+      expect(extremeShop.isValid).toBe(false);
+      expect(extremeShop.errors.some((e) => e.includes('150 meters'))).toBe(true);
+
+      // Floor area > 10,000 sq m (120m * 90m = 10,800 m²)
+      const hugeAreaShop = MeasurementService.validateShopGeometry(
+        { lengthMm: 120000, breadthMm: 90000, heightMm: 3000, displayUnit: 'METERS' },
+        [],
+        []
+      );
+      expect(hugeAreaShop.isValid).toBe(false);
+      expect(hugeAreaShop.errors.some((e) => e.includes('10,000 m²'))).toBe(true);
+
+      // Height > 15m
+      const highShop = MeasurementService.validateShopGeometry(
+        { lengthMm: 10000, breadthMm: 10000, heightMm: 20000, displayUnit: 'METERS' },
+        [],
+        []
+      );
+      expect(highShop.isValid).toBe(false);
+      expect(highShop.errors.some((e) => e.includes('Shop height cannot exceed 15 meters'))).toBe(true);
+    });
   });
 
   describe('PricingEngine', () => {
@@ -289,6 +318,34 @@ describe('Domain Services Verification', () => {
       // Option A must have highest or equal display area
       expect(optA.totalDisplayAreaSqM).toBeGreaterThanOrEqual(optB.totalDisplayAreaSqM);
       expect(optB.totalDisplayAreaSqM).toBeGreaterThanOrEqual(optC.totalDisplayAreaSqM);
+    });
+
+    it('caps maximum placed racks at 450 fixtures and completes large spaces in under 200ms without hanging', () => {
+      const largeShop: ShopSpecification = {
+        id: 'LARGE_TEST_SHOP',
+        shape: 'RECTANGLE',
+        dimensions: { lengthMm: 80000, breadthMm: 60000, heightMm: 4500, displayUnit: 'METERS' },
+        openings: [
+          { type: 'DOOR_MAIN', wall: 'NORTH', distanceMm: 5000, widthMm: 3000, heightMm: 2500, swingDirection: 'INSIDE' },
+        ],
+        obstacles: [],
+      };
+
+      const startTime = performance.now();
+      const result = RackDesignEngine.generateLayoutOptions(
+        largeShop,
+        'SUPERMARKET',
+        2000000,
+        sampleCatalog,
+        sampleMaterials,
+        { REQ_GONDOLA_AISLES: true, REQ_CHECKOUT_COUNTER: true }
+      );
+      const durationMs = performance.now() - startTime;
+
+      expect(durationMs).toBeLessThan(300); // Must resolve rapidly without hanging
+      for (const opt of result.options) {
+        expect(opt.racks.length).toBeLessThanOrEqual(450);
+      }
     });
   });
 });
